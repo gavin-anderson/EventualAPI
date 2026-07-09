@@ -1,0 +1,29 @@
+# Normalize line endings: store LF in the repo and check out LF everywhere.
+# Keeps a consistent tree across Windows/macOS/Linux and silences the
+# "LF will be replaced by CRLF" warnings on Windows.
+* text=auto eol=lf
+
+# Source / config — always LF
+*.ts        text eol=lf
+*.js        text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.sql       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+
+# systemd units are read on Linux and MUST be LF
+*.service   text eol=lf
+*.timer     text eol=lf
+
+# Shell scripts — LF or they won't run
+*.sh        text eol=lf
+
+# Binary assets — never touch
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.ico   binary

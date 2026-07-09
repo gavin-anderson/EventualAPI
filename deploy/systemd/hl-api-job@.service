@@ -1,0 +1,28 @@
+# Templated oneshot service: one instance per job name.
+#   systemctl start hl-api-job@sync-assets.service
+# The timers below trigger the right instances on a schedule.
+[Unit]
+Description=hl-api scheduled job: %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hl-api
+Group=hl-api
+WorkingDirectory=/opt/hl-api
+EnvironmentFile=/etc/hl-api/.env
+ExecStart=/usr/bin/node dist/jobs/run.js %i
+
+# Be a good neighbour to the API + ClickHouse on the same box.
+Nice=10
+IOSchedulingClass=idle
+# Don't let a wedged job run forever.
+TimeoutStartSec=600
+
+# Light hardening (jobs only do network I/O + read the build).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hl-api
+PrivateTmp=true

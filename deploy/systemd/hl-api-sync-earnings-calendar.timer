@@ -1,0 +1,13 @@
+# Tier A (discovery): full earnings calendar sync (90-day horizon). Daily.
+# Runs after sync-assets so new tickers are present.
+[Unit]
+Description=hl-api: daily earnings calendar sync
+
+[Timer]
+OnCalendar=*-*-* 08:15:00 UTC
+OnBootSec=2min
+Persistent=true
+Unit=hl-api-job@sync-earnings-calendar.service
+
+[Install]
+WantedBy=timers.target

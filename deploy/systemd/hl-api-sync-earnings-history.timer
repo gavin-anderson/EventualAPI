@@ -1,0 +1,12 @@
+# Tier A (discovery): past earnings + 24h price reaction. Daily.
+[Unit]
+Description=hl-api: daily earnings history sync
+
+[Timer]
+OnCalendar=*-*-* 08:30:00 UTC
+OnBootSec=3min
+Persistent=true
+Unit=hl-api-job@sync-earnings-history.service
+
+[Install]
+WantedBy=timers.target

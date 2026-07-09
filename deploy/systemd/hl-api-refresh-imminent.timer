@@ -1,0 +1,12 @@
+# Tier C (imminent): events within ~1h still unconfirmed. Every 5 min.
+# Escalated cadence for the final approach — self-gates to one query when idle.
+[Unit]
+Description=hl-api: imminent earnings refresh (<=1h, every 5 min)
+
+[Timer]
+OnCalendar=*-*-* *:0/5:00 UTC
+Persistent=false
+Unit=hl-api-job@refresh-imminent.service
+
+[Install]
+WantedBy=timers.target

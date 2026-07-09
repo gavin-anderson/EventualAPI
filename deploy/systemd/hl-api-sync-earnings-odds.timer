@@ -1,0 +1,12 @@
+# OPTIONAL — only enable if keeping Polymarket beat-odds (see docs/JOBS.md).
+# Polymarket odds move often near an event. Hourly.
+[Unit]
+Description=hl-api: hourly Polymarket earnings-odds sync
+
+[Timer]
+OnCalendar=*-*-* *:05:00 UTC
+Persistent=false
+Unit=hl-api-job@sync-earnings-odds.service
+
+[Install]
+WantedBy=timers.target

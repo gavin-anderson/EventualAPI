@@ -1,0 +1,12 @@
+# Tier B (approaching): events in (1h, 24h] still unconfirmed. Hourly.
+# Self-gates to one indexed query when nothing is approaching.
+[Unit]
+Description=hl-api: approaching earnings refresh (1-24h, hourly)
+
+[Timer]
+OnCalendar=*-*-* *:00:00 UTC
+Persistent=false
+Unit=hl-api-job@refresh-approaching.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# env / secrets — never commit
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# local scratch
+tmp/
+tmp-*.ts
+
+# local agent tooling (Claude Code / skill bundles) — keep out of the app repo
+.claude/
+.agents/
+skills-lock.json
+.mcp.json
+
+# Supabase CLI project — DB is managed via the MCP/dashboard, not the CLI.
+# config.toml holds the project ref/URLs; migrations are applied to the live DB.
+supabase/
