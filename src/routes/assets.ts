@@ -12,6 +12,7 @@ const VALID_TICKER = /^[A-Za-z]{1,10}$/;
 
 const listSchema = z.object({
   dex: z.string().trim().min(1).max(64).optional(),
+  kind: z.string().trim().min(1).max(16).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -28,16 +29,17 @@ assetsRouter.get(
     if (!parsed.success) {
       throw badRequest(parsed.error.issues.map((i) => i.message).join("; "));
     }
-    const { dex, limit, offset } = parsed.data;
+    const { dex, kind, limit, offset } = parsed.data;
 
     const db = supabaseAdmin();
     let q = db
       .from("assets")
-      .select("id, dex, hl_coin, ticker, name, image_ref", { count: "exact" })
+      .select("id, dex, hl_coin, ticker, name, image_ref, kind", { count: "exact" })
       .order("ticker")
       .range(offset, offset + limit - 1);
 
     if (dex) q = q.eq("dex", dex);
+    if (kind) q = q.eq("kind", kind);
 
     const { data, error, count } = await q;
     if (error) throw new Error(`assets list failed: ${error.message}`);
@@ -69,7 +71,7 @@ assetsRouter.get(
       db
         .from("assets")
         .select(
-          `id, dex, hl_coin, ticker, name, image_ref,
+          `id, dex, hl_coin, ticker, name, image_ref, kind,
            earnings_events (
              id, earnings_at, time_precision, session, is_confirmed, expected_eps, source
            ),
@@ -113,6 +115,7 @@ assetsRouter.get(
         ticker: asset.ticker,
         name: asset.name,
         imageRef: asset.image_ref,
+        kind: asset.kind,
       },
       nextEarnings: nextEvent,
       earningsOdds: (asset.earnings_odds as unknown[])?.[0] ?? null,
@@ -126,7 +129,7 @@ assetsRouter.get(
 
 interface PriceRow {
   mark_px: number;
-  ts: string;
+  as_of: string;
 }
 
 async function fetchMarkPrice(ticker: string) {
@@ -140,7 +143,7 @@ async function fetchMarkPrice(ticker: string) {
   // hl_coin in asset_ctx matches the ticker for most HL perps (e.g. AAPL-PERP → AAPL)
   const rows = await query<PriceRow>(
     "asset_mark_price",
-    `SELECT argMax(mark_px, ts) AS mark_px, max(ts) AS ts
+    `SELECT argMax(mark_px, ts) AS mark_px, max(ts) AS as_of
      FROM ${db}.asset_ctx
      WHERE coin = {ticker:String}
        AND ts > now() - INTERVAL 1 HOUR

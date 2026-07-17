@@ -8,7 +8,7 @@ a crashing job can't take the API down.
 
 ```bash
 npm run build
-npm run job -- sync-assets          # or job:dev for tsx (no build)
+npm run job -- sync-earnings-calendar   # or job:dev for tsx (no build)
 node dist/jobs/run.js refresh-imminent
 ```
 
@@ -16,17 +16,16 @@ Jobs (registry in `src/jobs/run.ts`):
 
 | Name | Populates | Cadence |
 |---|---|---|
-| `sync-assets` | `assets` + logos | daily (+ on boot) |
 | `sync-earnings-calendar` | `earnings_events` (90d) | daily (+ on boot) |
 | `sync-earnings-history` | `earnings_history` | daily (+ on boot) |
-| `snapshot-account-values` | `account_value_snapshots` | daily |
 | `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed | hourly |
 | `refresh-imminent` | `earnings_events` in [~now, 1h], unconfirmed | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
 
-Ordering: `sync-assets` must run before the earnings jobs (they join on
-`assets`). The daily timers are staggered (08:00 / 08:15 / 08:30 UTC, and
-1/2/3 min after boot) for this.
+The `assets` table is maintained **manually** (ticker → name → logo; logos
+uploaded once to the `asset-logos` bucket). The earnings jobs join on it, so it
+must be seeded before they can populate anything. Calendar/history timers are
+staggered (08:15 / 08:30 UTC, +2/3 min after boot).
 
 ## The earnings-timing cadence (Approach A: static self-gating)
 
@@ -83,12 +82,10 @@ cp deploy/systemd/*.timer            /etc/systemd/system/
 systemctl daemon-reload
 
 systemctl enable --now \
-  hl-api-sync-assets.timer \
   hl-api-sync-earnings-calendar.timer \
   hl-api-sync-earnings-history.timer \
   hl-api-refresh-approaching.timer \
-  hl-api-refresh-imminent.timer \
-  hl-api-snapshot-account-values.timer
+  hl-api-refresh-imminent.timer
 
 # Optional — only if keeping Polymarket odds:
 # systemctl enable --now hl-api-sync-earnings-odds.timer
@@ -98,7 +95,7 @@ systemctl enable --now \
 
 ```bash
 systemctl list-timers 'hl-api-*'                       # next/last run times
-systemctl start hl-api-job@sync-assets.service         # run one now
+systemctl start hl-api-job@sync-earnings-calendar.service   # run one now
 journalctl -u 'hl-api-job@refresh-imminent.service' -n 100   # logs (JSON)
 ```
 

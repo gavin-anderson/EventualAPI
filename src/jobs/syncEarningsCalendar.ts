@@ -34,7 +34,7 @@ export async function syncEarningsCalendar(): Promise<void> {
     .select("id, ticker");
 
   if (assetsErr || !assets?.length) {
-    log.warn("no assets found — run syncAssets first");
+    log.warn("no assets found — seed the assets table first");
     return;
   }
 

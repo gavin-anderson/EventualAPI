@@ -1,5 +1,5 @@
 # Tier A (discovery): full earnings calendar sync (90-day horizon). Daily.
-# Runs after sync-assets so new tickers are present.
+# Joins on the (manually-seeded) assets table for the ticker list.
 [Unit]
 Description=hl-api: daily earnings calendar sync
 

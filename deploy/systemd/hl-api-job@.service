@@ -1,5 +1,5 @@
 # Templated oneshot service: one instance per job name.
-#   systemctl start hl-api-job@sync-assets.service
+#   systemctl start hl-api-job@sync-earnings-calendar.service
 # The timers below trigger the right instances on a schedule.
 [Unit]
 Description=hl-api scheduled job: %i

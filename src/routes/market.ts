@@ -18,7 +18,7 @@ interface MarketRow {
   mid_px: number | null;
   open_interest: number;
   day_volume: number;
-  ts: string;
+  as_of: string;
 }
 
 interface PerpMetaRow {
@@ -30,7 +30,7 @@ interface PerpMetaRow {
 interface PerpPriceRow {
   coin: string;
   mark_px: number;
-  ts: string;
+  as_of: string;
 }
 
 interface CandleRow {
@@ -84,7 +84,7 @@ marketRouter.get(
         argMax(mid_px, ts)        AS mid_px,
         argMax(open_interest, ts) AS open_interest,
         argMax(day_volume, ts)    AS day_volume,
-        max(ts)                   AS ts
+        max(ts)                   AS as_of
       FROM ${config.clickhouse.database}.asset_ctx
       WHERE ${conditions.join(" AND ")}
       GROUP BY dex, coin
@@ -93,7 +93,7 @@ marketRouter.get(
     `;
 
     const rows = await query<MarketRow>("market_sample", sql, params);
-    res.json({ asOf: rows[0]?.ts ?? null, count: rows.length, markets: rows });
+    res.json({ asOf: rows[0]?.as_of ?? null, count: rows.length, markets: rows });
   }),
 );
 
@@ -127,7 +127,7 @@ marketRouter.get(
       // Current snapshot
       const [snapshot] = await query<PerpPriceRow>(
         "perp_snapshot",
-        `SELECT coin, argMax(mark_px, ts) AS mark_px, max(ts) AS ts
+        `SELECT coin, argMax(mark_px, ts) AS mark_px, max(ts) AS as_of
          FROM ${db}.asset_ctx
          WHERE coin = {coin:String} ${dexFilter}
            AND ts > now() - INTERVAL 1 HOUR
@@ -139,7 +139,7 @@ marketRouter.get(
       // Max leverage from perp_meta
       const [meta] = await query<PerpMetaRow>(
         "perp_meta",
-        `SELECT dex, coin, argMax(max_leverage, ts) AS max_leverage
+        `SELECT dex, coin, argMax(max_leverage, ingested_at) AS max_leverage
          FROM ${db}.perp_meta
          WHERE coin = {coin:String} ${dexFilter}
          GROUP BY dex, coin`,
@@ -151,17 +151,17 @@ marketRouter.get(
         "perp_price_change",
         `SELECT
            multiIf(
-             ts >= now() - INTERVAL 1 HOUR,  '1h',
-             ts >= now() - INTERVAL 1 DAY,   '1d',
-             ts >= now() - INTERVAL 7 DAY,   '7d',
+             open_ts >= now() - INTERVAL 1 HOUR,  '1h',
+             open_ts >= now() - INTERVAL 1 DAY,   '1d',
+             open_ts >= now() - INTERVAL 7 DAY,   '7d',
              '30d'
            ) AS bucket,
-           argMin(close, ts) AS close
+           argMin(close_px, open_ts) AS close
          FROM ${db}.candles
          WHERE coin = {coin:String} ${dexFilter}
            AND interval = '1h'
-           AND ts >= now() - INTERVAL 30 DAY
-           AND ts < now() - INTERVAL 1 MINUTE
+           AND open_ts >= now() - INTERVAL 30 DAY
+           AND open_ts < now() - INTERVAL 1 MINUTE
          GROUP BY bucket`,
         params,
       );
@@ -186,7 +186,7 @@ marketRouter.get(
           "7d":  pctChange(baseline["7d"]),
           "30d": pctChange(baseline["30d"]),
         },
-        asOf: snapshot.ts,
+        asOf: snapshot.as_of,
       };
     });
 
@@ -237,14 +237,14 @@ marketRouter.get(
 
     const rows = await query<CandleRow>(
       "perp_candles",
-      `SELECT ts, open, high, low, close, volume
+      `SELECT open_ts AS ts, open_px AS open, high_px AS high, low_px AS low, close_px AS close, volume
        FROM ${db}.candles
        WHERE coin = {coin:String}
          AND interval = {interval:String}
-         AND ts >= fromUnixTimestamp({from:Int64})
-         AND ts <= fromUnixTimestamp({to:Int64})
+         AND open_ts >= fromUnixTimestamp({from:Int64})
+         AND open_ts <= fromUnixTimestamp({to:Int64})
          ${dexFilter}
-       ORDER BY ts ASC
+       ORDER BY open_ts ASC
        LIMIT {limit:UInt32}`,
       params,
     );

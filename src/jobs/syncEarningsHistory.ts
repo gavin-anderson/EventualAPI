@@ -35,7 +35,7 @@ export async function syncEarningsHistory(): Promise<void> {
     .select("id, hl_coin, ticker");
 
   if (assetsErr || !assets?.length) {
-    log.warn("no assets found — run syncAssets first");
+    log.warn("no assets found — seed the assets table first");
     return;
   }
 
@@ -123,12 +123,12 @@ async function compute24hPriceChange(
     query<CandlePriceRow & { label: string }>(
       "earnings_price_change",
       `SELECT
-         multiIf(ts <= fromUnixTimestamp({before:Int64}), 'pre', 'post') AS label,
-         argMax(close, ts) AS close
+         multiIf(open_ts <= fromUnixTimestamp({before:Int64}), 'pre', 'post') AS label,
+         argMax(close_px, open_ts) AS close
        FROM ${db}.candles
        WHERE coin = {coin:String}
          AND interval = '1h'
-         AND ts BETWEEN fromUnixTimestamp({before:Int64}) - INTERVAL 2 HOUR
+         AND open_ts BETWEEN fromUnixTimestamp({before:Int64}) - INTERVAL 2 HOUR
                AND fromUnixTimestamp({after:Int64}) + INTERVAL 2 HOUR
          ${dexFilter}
        GROUP BY label`,

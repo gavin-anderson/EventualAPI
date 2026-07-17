@@ -1,7 +1,8 @@
 import { config } from "../config/env.js";
+import { curlGetJson } from "./curl.js";
 
 const BASE = "https://api.benzinga.com/api/v2.1/calendar/earnings";
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 // ── Response types ────────────────────────────────────────────────────────────
 
@@ -69,16 +70,14 @@ async function fetchEarnings(params: Record<string, string>): Promise<BenzingaEa
   }
   const url = new URL(BASE);
   url.searchParams.set("token", config.benzinga.apiKey);
+  url.searchParams.set("pagesize", "1000"); // avoid silent pagination truncation
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v);
   }
-  const resp = await fetch(url.toString(), {
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  // Benzinga's WAF blocks Node's TLS fingerprint — fetch via curl (see lib/curl).
+  const data = await curlGetJson<BenzingaResponse>(url.toString(), {
+    timeoutMs: REQUEST_TIMEOUT_MS,
   });
-  if (!resp.ok) {
-    throw new Error(`Benzinga API error: ${resp.status} ${resp.statusText}`);
-  }
-  const data = (await resp.json()) as BenzingaResponse;
   return data.earnings ?? [];
 }
 
@@ -90,7 +89,7 @@ export function fetchUpcomingEarnings(
   const from = new Date();
   const to = new Date(Date.now() + days * 86_400_000);
   return fetchEarnings({
-    tickers: tickers.join(","),
+    "parameters[tickers]": tickers.join(","),  // Benzinga filters on parameters[tickers], not tickers
     date_from: from.toISOString().slice(0, 10),
     date_to: to.toISOString().slice(0, 10),
     "parameters[importance]": "0",  // all importance levels
@@ -105,7 +104,7 @@ export function fetchHistoricalEarnings(
   const to = new Date();
   const from = new Date(Date.now() - days * 86_400_000);
   return fetchEarnings({
-    tickers: tickers.join(","),
+    "parameters[tickers]": tickers.join(","),  // Benzinga filters on parameters[tickers], not tickers
     date_from: from.toISOString().slice(0, 10),
     date_to: to.toISOString().slice(0, 10),
     "parameters[importance]": "0",

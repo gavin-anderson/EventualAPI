@@ -11,20 +11,16 @@
  * Usage: node dist/jobs/run.js <job-name>
  */
 import { logger } from "../lib/logger.js";
-import { syncAssets } from "./syncAssets.js";
 import { syncEarningsCalendar } from "./syncEarningsCalendar.js";
 import { syncEarningsHistory } from "./syncEarningsHistory.js";
 import { syncEarningsOdds } from "./syncEarningsOdds.js";
-import { snapshotAccountValues } from "./snapshotAccountValues.js";
 import { refreshImminentEarnings } from "./refreshImminentEarnings.js";
 
 /** Registry of runnable jobs. The imminent tiers bake in their window defaults. */
 const jobs: Record<string, () => Promise<void>> = {
-  "sync-assets": syncAssets,
   "sync-earnings-calendar": syncEarningsCalendar,
   "sync-earnings-history": syncEarningsHistory,
   "sync-earnings-odds": syncEarningsOdds,
-  "snapshot-account-values": snapshotAccountValues,
   // Near-event precision tiers. The daily calendar sync covers everything
   // broadly; these ONLY touch soon-and-still-unconfirmed events, so they never
   // re-do the daily's work and never fetch the whole universe. Each self-gates
