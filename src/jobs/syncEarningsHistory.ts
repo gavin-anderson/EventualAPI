@@ -68,18 +68,22 @@ export async function syncEarningsHistory(): Promise<void> {
           () => null,
         );
 
-        const { error } = await sb.from("earnings_history").upsert(
-          {
-            asset_id:             asset.id,
-            reported_at:          reportedAt,
-            eps_actual:           Number(e.eps),
-            eps_estimate:         e.eps_est ? Number(e.eps_est) : null,
-            eps_surprise_pct:     e.eps_surprise_percent ? Number(e.eps_surprise_percent) : null,
-            price_change_24h_pct: priceChangePct,
-            source:               "benzinga",
-          },
-          { onConflict: "asset_id,reported_at" },
-        );
+        const row: Record<string, unknown> = {
+          asset_id:         asset.id,
+          reported_at:      reportedAt,
+          eps_actual:       Number(e.eps),
+          eps_estimate:     e.eps_est ? Number(e.eps_est) : null,
+          eps_surprise_pct: e.eps_surprise_percent ? Number(e.eps_surprise_percent) : null,
+          source:           "benzinga",
+        };
+        // Only write the reaction when ClickHouse actually computed one. Omitting the
+        // column on conflict PRESERVES an existing value (e.g. a Stooq backfill) instead
+        // of clobbering it with null; ClickHouse wins for the dates it does cover.
+        if (priceChangePct !== null) row.price_change_24h_pct = priceChangePct;
+
+        const { error } = await sb.from("earnings_history").upsert(row, {
+          onConflict: "asset_id,reported_at",
+        });
 
         if (error) {
           log.error({ ticker: e.ticker, error: error.message }, "upsert failed");

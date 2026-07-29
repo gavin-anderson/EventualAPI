@@ -38,6 +38,25 @@ function etOffsetMs(instant: number): number {
  * @returns e.g. "2026-01-15T21:00:00.000Z"  (16:00 EST → 21:00 UTC)
  *               "2026-07-15T20:00:00.000Z"  (16:00 EDT → 20:00 UTC)
  */
+/**
+ * Minutes-since-midnight in America/New_York for a UTC instant (DST-aware). Used
+ * to classify an exact-time earnings slot into pre/regular/after market when
+ * Benzinga gave a precise time (and thus no session code).
+ */
+export function etMinutesOfDay(iso: string): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const f: Record<string, number> = {};
+  for (const p of dtf.formatToParts(new Date(iso))) {
+    if (p.type !== "literal") f[p.type] = Number(p.value);
+  }
+  return (f.hour ?? 0) * 60 + (f.minute ?? 0);
+}
+
 export function etToUtcIso(date: string, time: string): string {
   const [y, mo, d] = date.split("-").map(Number);
   const [h, mi, s] = time.split(":").map(Number);

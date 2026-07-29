@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { config } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { clickhouse } from "./lib/clickhouse.js";
+import { attachPriceWs } from "./ws/server.js";
 
 const app = createApp();
 
@@ -16,9 +17,14 @@ const server = app.listen(config.port, () => {
   );
 });
 
+// Anonymous price stream on /v1/ws/prices, sharing the HTTP server.
+const priceWs = attachPriceWs(server);
+
 /** Graceful shutdown: stop accepting connections, then close upstreams. */
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "shutting down");
+  priceWs.close();
+  for (const ws of priceWs.clients) ws.terminate();
   server.close(async (err) => {
     if (err) logger.error({ err }, "error during server close");
     try {

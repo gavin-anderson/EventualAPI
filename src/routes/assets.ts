@@ -107,6 +107,11 @@ assetsRouter.get(
     const now = new Date().toISOString();
     const nextEvent = allEvents.find((e) => (e.earnings_at as string) >= now) ?? null;
 
+    // earnings_odds is one-to-one (unique asset_id), so PostgREST embeds it as an
+    // OBJECT, not an array — index defensively so it works either way.
+    const oddsRaw = asset.earnings_odds;
+    const earningsOdds = Array.isArray(oddsRaw) ? (oddsRaw[0] ?? null) : (oddsRaw ?? null);
+
     res.json({
       asset: {
         id: asset.id,
@@ -118,7 +123,7 @@ assetsRouter.get(
         kind: asset.kind,
       },
       nextEarnings: nextEvent,
-      earningsOdds: (asset.earnings_odds as unknown[])?.[0] ?? null,
+      earningsOdds,
       earningsHistory: asset.earnings_history,
       market: priceRows,
     });

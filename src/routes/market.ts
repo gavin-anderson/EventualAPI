@@ -235,17 +235,23 @@ marketRouter.get(
     const params: Record<string, unknown> = { coin, interval, from, to, limit };
     if (dex) params.dex = dex;
 
+    // When more candles exist in the window than `limit`, keep the MOST RECENT
+    // ones (inner DESC + LIMIT), then return ascending for charting. Ordering ASC
+    // before the limit would drop the newest candles — wrong for a chart.
     const rows = await query<CandleRow>(
       "perp_candles",
-      `SELECT open_ts AS ts, open_px AS open, high_px AS high, low_px AS low, close_px AS close, volume
-       FROM ${db}.candles
-       WHERE coin = {coin:String}
-         AND interval = {interval:String}
-         AND open_ts >= fromUnixTimestamp({from:Int64})
-         AND open_ts <= fromUnixTimestamp({to:Int64})
-         ${dexFilter}
-       ORDER BY open_ts ASC
-       LIMIT {limit:UInt32}`,
+      `SELECT ts, open, high, low, close, volume FROM (
+         SELECT open_ts AS ts, open_px AS open, high_px AS high, low_px AS low, close_px AS close, volume
+         FROM ${db}.candles
+         WHERE coin = {coin:String}
+           AND interval = {interval:String}
+           AND open_ts >= fromUnixTimestamp({from:Int64})
+           AND open_ts <= fromUnixTimestamp({to:Int64})
+           ${dexFilter}
+         ORDER BY open_ts DESC
+         LIMIT {limit:UInt32}
+       )
+       ORDER BY ts ASC`,
       params,
     );
 
