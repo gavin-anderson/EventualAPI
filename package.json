@@ -16,7 +16,9 @@
     "job:dev": "tsx src/jobs/run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --ext .ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "art": "tsx src/scripts/uploadArt.ts",
+    "intake": "tsx src/scripts/intake.ts"
   },
   "dependencies": {
     "@privy-io/server-auth": "^1.15.3",
@@ -36,6 +38,7 @@
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
     "eslint": "^8.57.0",
+    "sharp": "^0.35.5",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "vitest": "^4.1.10"

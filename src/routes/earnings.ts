@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import { badRequest, notFound } from "../lib/httpError.js";
+import { artUrl } from "../lib/assetArt.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { etMinutesOfDay } from "../lib/datetime.js";
 
@@ -31,7 +32,8 @@ interface AssetEmbed {
   name: string | null;
   hl_coin: string;
   dex: string;
-  image_ref: string | null;
+  icon_ref: string | null;
+  card_ref: string | null;
   kind: string | null;
 }
 
@@ -99,7 +101,7 @@ earningsRouter.get(
       .select(
         `earnings_at, time_precision, session, is_confirmed, expected_eps, source,
          period, period_year,
-         assets!inner ( ticker, name, hl_coin, dex, image_ref, kind )`,
+         assets!inner ( ticker, name, hl_coin, dex, icon_ref, card_ref, kind )`,
       )
       .gte("earnings_at", from)
       .order("earnings_at", { ascending: true })
@@ -128,6 +130,11 @@ earningsRouter.get(
             subtitle: asset.name,
             companyName: asset.name,
             fiscalPeriodEnd: null,
+            // Absolute URLs, not storage paths: the app should not have to know
+            // the bucket or the project. Null where no art has been supplied —
+            // the card view already falls back to a logo tile.
+            iconUrl: artUrl(asset.icon_ref),
+            cardUrl: artUrl(asset.card_ref),
             consensus: {
               epsEstimate: row.expected_eps == null ? null : String(row.expected_eps),
               currency: "USD",
@@ -167,7 +174,7 @@ earningsRouter.get(
     const { data, error } = await supabaseAdmin()
       .from("assets")
       .select(
-        `ticker, name, kind, hl_coin,
+        `ticker, name, kind, hl_coin, icon_ref, card_ref, description,
          earnings_events (
            id, earnings_at, time_precision, session, is_confirmed, expected_eps, source,
            period, period_year
@@ -201,6 +208,9 @@ earningsRouter.get(
       name: row.name,
       kind: row.kind,
       coin: row.hl_coin,
+      description: row.description ?? null,
+      iconUrl: artUrl(row.icon_ref as string | null),
+      cardUrl: artUrl(row.card_ref as string | null),
       next: events.find((e) => (e.earnings_at as string) >= now) ?? null,
       history: row.earnings_history ?? [],
       odds,

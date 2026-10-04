@@ -2,7 +2,7 @@
 
 API service for the Hyperliquid earnings app. Serves:
 
-- **Anonymous reads** — the earnings calendar.
+- **Anonymous reads** — the earnings calendar and asset art.
 - **Authenticated, user-scoped** — sign-up, profiles, trades and takes,
   watchlist, feed and push, behind Privy access-token verification.
 
@@ -23,8 +23,8 @@ TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` �
 | GET    | `/healthz`                      | none          | Liveness.                                            |
 | GET    | `/readyz`                       | none          | Readiness (pings Supabase; reports auth-bridge state).|
 | GET    | `/metrics`                      | none          | Prometheus metrics.                                  |
-| GET    | `/v1/earnings`                  | **anonymous** | Earnings calendar, shaped to the app's `MarketEvent`. `?from= &to= &dex= &limit=`. |
-| GET    | `/v1/earnings/:ticker`          | **anonymous** | One ticker: next event + past results + beat odds.   |
+| GET    | `/v1/earnings`                  | **anonymous** | Earnings calendar, shaped to the app's `MarketEvent`; metadata carries `iconUrl`/`cardUrl`. `?from= &to= &dex= &limit=`. |
+| GET    | `/v1/earnings/:ticker`          | **anonymous** | One ticker: next event + past results + beat odds, plus name, description and art URLs. |
 | POST   | `/v1/auth/signup`               | Privy bearer  | Sign-up and every-launch bootstrap. Idempotent.      |
 | GET    | `/v1/profile`                   | Privy bearer  | The caller's own profile.                            |
 | GET    | `/v1/profile/username/check`    | Privy bearer  | Availability hint. `?name=`                          |
@@ -67,6 +67,28 @@ npm run build && npm start
 
 Other scripts: `npm run typecheck`, `npm run lint`, `npm test`.
 
+### Catalogue maintenance
+
+Two local CLIs, run by hand rather than on a timer — both need judgement, and a
+job that guessed would fill the catalogue with wrong rows. Both read the mobile
+repo, so they assume `../earningsMobile` is checked out alongside this one.
+
+```bash
+npm run intake status            # HL universe vs. our catalogue
+npm run intake sync -- --dry-run # preview new listings and delistings
+npm run intake sync              # insert new live markets, flag delisted ones
+npm run intake seed              # backfill name/description from the app bundle
+
+npm run art -- --dry-run         # preview the art conversion
+npm run art                      # convert to WebP, upload, write icon_ref/card_ref
+npm run art -- --force           # re-upload when only object metadata changed
+```
+
+`sync` never guesses: a market the app bundle doesn't know arrives unnamed with
+`reports_earnings` null, and is printed as needing you. `art` is idempotent —
+destination paths contain a hash of the content, so a second run computes the
+same path and skips.
+
 ## Configuration
 
 See `.env.example`. The anonymous read tier needs only `SUPABASE_URL` and
@@ -91,6 +113,7 @@ needs an explicit `revoke` on top of RLS.
 
 - [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md) — Privy → Supabase flow & identity model.
 - [docs/RLS.md](docs/RLS.md) — access tiers & RLS policies.
+- [docs/ASSET_CATALOGUE.md](docs/ASSET_CATALOGUE.md) — how a market gets a row, a name and art.
 
 ## Not yet wired
 
