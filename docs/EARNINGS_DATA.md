@@ -22,7 +22,7 @@ get nothing back for un-entitled tickers.
 Two sources feed the single `earnings_history.price_change_24h_pct` column,
 partitioned by date:
 
-- **Post-perp dates** → ClickHouse candles, computed by `sync-earnings-history`.
+- **Post-perp dates** → Hyperliquid `candleSnapshot`, via `sync-earnings-history`.
 - **Pre-perp dates** (before the HL equity perp existed, ~2026‑06‑15) → one-time
   backfill from a free, key-free source (Yahoo chart API, `src/lib/dailyPrices.ts`),
   via the **`backfill-earnings-reactions`** job. Yahoo covers *all* tickers, so
@@ -32,7 +32,7 @@ Details:
 - `backfill-earnings-reactions` fills every row where `price_change_24h_pct IS NULL`
   (optional ticker args). `node dist/jobs/run.js backfill-earnings-reactions [TICKER...]`.
 - `sync-earnings-history` no longer clobbers a non-null reaction with null on re-run
-  (ClickHouse wins where it has data; backfill is preserved otherwise).
+  (HL wins where it has candles; the backfill value is preserved otherwise).
 - **Reference/final price rule** (per Malcolm), keyed on the ET session of `reported_at`
   (there's no `session` column on `earnings_history`, so it's derived from the ET clock):
   - pre-market / morning (or intraday): ref = prior trading day close, final = report-day close

@@ -36,21 +36,37 @@ Realtime it uses the **minted Supabase** token.
 - It is the `profiles` primary key AND the minted JWT `sub`.
 - Because `sub` is **text, not a uuid**, RLS uses `auth.jwt() ->> 'sub'`,
   **never** `auth.uid()` (which expects a uuid and would be null/error here).
-- Profiles are created **lazily** on the first authenticated call (`GET /v1/profile`),
-  upserted server-side with the service role. No Privy webhook needed.
+- Profiles are created **lazily** on the first authenticated call
+  (`POST /v1/auth/signup`, or `GET /v1/profile`), with the service role. No Privy
+  webhook needed.
 
-## Wallet enrichment (later)
+## Wallet resolution
 
-The Privy access token does not carry the linked wallet. Resolving the user's
-Hyperliquid address uses the Privy server SDK's `getUser()` (needs the Privy app
-secret). Until then, `wallet` is `null` and `profiles.wallet_address` stays empty.
+The access token carries no wallet — `AuthTokenClaims` is only
+`{ appId, issuer, issuedAt, expiration, sessionId, userId }`. The embedded
+address comes from the Privy server SDK's `getUser()`, which needs the **app
+secret**.
+
+It reads the *embedded* wallet from `linkedAccounts` (`type: "wallet"` +
+`walletClientType: "privy"` + `chainType: "ethereum"`), not `user.wallet` —
+that field is the most recently linked wallet and can be an external one. The
+embedded wallet is the account the app funds and signs with, so it is the only
+address that joins our records to on-chain activity.
+
+Failure is non-fatal: sign-up still succeeds and reports `walletStatus` as
+`unresolved` (still provisioning) or `not_configured` (no app secret), with the
+next call retrying.
 
 ## Enabling
 
-The bridge turns on only when **both** halves are configured (`config.auth.configured`):
+| Credential | Needed for |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` | minting sessions |
+| `PRIVY_APP_ID` | token audience |
+| `PRIVY_VERIFICATION_KEY` | offline token verification (ES256 **public key**, not the app id) |
+| `PRIVY_APP_SECRET` | wallet resolution only |
 
-- Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
-- Privy: `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`
-
-Until then, `/v1/profile` and `/v1/auth/session` return `503 auth_not_configured`,
-while the anonymous read tier (`/v1/market/sample`) works normally.
+`config.auth.configured` gates the authenticated routes; `privy.canResolveWallet`
+is tracked separately, so sign-in can work before wallet resolution does.
+Unconfigured, authenticated routes return `503 auth_not_configured` while the
+anonymous read tier (`/v1/earnings`, `/v1/assets`) works normally.

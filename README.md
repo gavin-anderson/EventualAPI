@@ -1,26 +1,20 @@
 # hl-api
 
-API service for the Hyperliquid portfolio/earnings app. Sibling to `hl-ingest`
-(which owns market-data ingestion into ClickHouse — now being retired). `hl-api`
-serves the app:
+API service for the Hyperliquid earnings app. Serves:
 
-- **Anonymous, read-only** earnings calendar and asset catalogue from Supabase.
-- **Authenticated** user-scoped resources via the **Privy → Supabase auth bridge**
-  (scaffolded; dormant until Privy/Supabase secrets are set).
+- **Anonymous reads** — earnings calendar, asset catalogue, price WebSocket.
+- **Authenticated, user-scoped** — sign-up, profiles, trades and takes, via the
+  Privy → Supabase auth bridge.
 
-The app talks **directly to Supabase** (under RLS) for simple CRUD + Realtime, and
-to `hl-api` for anything proprietary (earnings data, per-user Hyperliquid reads).
-Trading is out of scope — the app signs and submits orders itself.
-
-Market prices come from Hyperliquid's public `/info` directly (no proxy). The
-ClickHouse-backed market routes were removed; the only remaining ClickHouse
-consumers are `ws/priceHub` and the earnings-history reaction calculation, both
-pending a re-point.
+Two data sources, no others: **Supabase** for everything we author, and
+**Hyperliquid's public `/info`** for everything priced or on-chain (direct, no
+proxy). Trading is out of scope — the app signs and submits orders itself, then
+reports them here for verification.
 
 ## Stack
 
-TypeScript · Node ≥20 · Express · `@clickhouse/client` · `supabase-js` ·
-`@privy-io/server-auth` · `pino` · `prom-client` · `zod`.
+TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` ·
+`ws` · `pino` · `prom-client` · `zod`.
 
 ## Endpoints
 
@@ -58,32 +52,33 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm test`.
 
 ## Configuration
 
-See `.env.example`. The only thing needed for the anonymous read tier is the
-Supabase connection (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`).
+See `.env.example`. The anonymous read tier needs only `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`.
 
-`CH_*` is still read by the two remaining ClickHouse consumers (`ws/priceHub`,
-`sync-earnings-history`) and goes away once those are re-pointed.
-
-The auth bridge turns on only when **both** Supabase (`SUPABASE_URL`,
-`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`) and Privy (`PRIVY_APP_ID`,
-`PRIVY_VERIFICATION_KEY`) are configured.
+The auth bridge needs Supabase (plus `SUPABASE_JWT_SECRET`) **and** Privy
+(`PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`). `PRIVY_APP_SECRET` is separate and
+only enables embedded-wallet resolution — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
 
 ## Supabase
 
-Migrations live in `supabase/migrations/`. Apply `20260621000000_init_profiles.sql`
-to a fresh project (SQL editor, or `supabase db push` with the CLI). The access
-model (public read, user-scoped write, service-role bypass) is documented in
-[docs/RLS.md](docs/RLS.md).
+Migrations live in `supabase/migrations/`, applied in filename order. Note
+`supabase/` is gitignored, so those files are the only local record of a schema
+that is managed through the dashboard/MCP.
+
+**Read [docs/RLS.md](docs/RLS.md) before adding a table.** This project's default
+privileges grant every new table in `public` full access to `anon`, so each one
+needs an explicit `revoke` on top of RLS.
 
 ## Docs
 
 - [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md) — Privy → Supabase flow & identity model.
 - [docs/RLS.md](docs/RLS.md) — access tiers & RLS policies.
 
-## Not yet wired (later phases / passes)
+## Not yet wired
 
-- **CI/CD & hosting** — deliberately deferred. Will mirror the `hl-ingest` pattern
-  (GitHub Actions → tailnet → ship → restart) or a managed Node host + Tailscale.
-- **Privy** — verification + wallet enrichment (`getUser`) once the Privy app exists.
-- **Observability wiring** — Alloy scrape config for this service's `/metrics`.
-- No Redis/queue/object-storage/per-user Hyperliquid/chat — out of Phase 0 scope.
+- **CI/CD & hosting** — no Dockerfile, no CI, no service unit. The job timers in
+  `deploy/systemd/` cover the scheduled jobs only, not the API process.
+- **Job liveness alerting** — the earnings jobs stopped for two months in 2026
+  and nothing noticed.
+- **The app** — the iOS client does not call hl-api yet, and must attach a
+  `cloid` to its orders before the trade endpoints can verify anything.

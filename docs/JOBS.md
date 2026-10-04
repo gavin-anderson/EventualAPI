@@ -103,54 +103,13 @@ journalctl -u 'hl-api-job@refresh-imminent.service' -n 100   # logs (JSON)
 
 ## Approach B (planned): DB-backed per-event schedule
 
-Approach A polls on wall-clock ticks. That's ideal for "to the hour," but it
-can't (a) poll at exact per-event offsets (T-30, T-10, T-2…), or (b) act the
-*instant* a time is confirmed (e.g. fire a push notification). When those become
-requirements — or the imminent-event count per tick strains Benzinga rate limits
-— evolve to a **schedule table** instead of fixed windows:
+Approach A polls on wall-clock ticks, which is right for "to the hour" but can't
+poll at per-event offsets or react the instant a time is confirmed. When those
+become requirements, the evolution is a `earnings_refresh_schedule` table with a
+`next_run_at`, processed by a **frequent oneshot** (`... where next_run_at <=
+now() FOR UPDATE SKIP LOCKED`) rather than a long-running daemon — same process
+model as today, with per-event precision.
 
-```
-earnings_refresh_schedule(
-  earnings_event_id  uuid primary key references earnings_events(id),
-  next_run_at        timestamptz not null,
-  cadence_seconds    int not null,        -- shrinks as the event nears
-  ...
-)
-```
-
-The daily discovery seeds/updates one row per upcoming event; a worker processes
-rows where `next_run_at <= now()`, refreshes them, and reschedules `next_run_at`.
-State lives in Postgres, so it's restart-safe and dedup is a unique key — the same
-properties Approach A gets for free, now with per-event precision.
-
-### Should the Approach-B worker be its own process, outside the API?
-
-**Yes — and preferably it shouldn't be a long-running daemon at all.** Two ways to
-build it:
-
-1. **Long-running scheduler daemon.** If it holds a poll loop / in-memory timers,
-   it **must** be its own process, never embedded in the API:
-   - **Main-thread isolation** — a continuous loop + refresh work would share the
-     API's single event loop; even I/O-bound, that couples lifecycles and adds
-     latency jitter. Separate process = the API's loop is never touched. (Same
-     reasoning as the job runner today.)
-   - **Independent lifecycle** — deploy/restart the scheduler without bouncing the
-     API, and vice versa.
-   - **Crash isolation** — a scheduler bug can't take the API down.
-   - **Must be a singleton** — one scheduler, or you double-schedule. Running it in
-     the API (which you'll want to scale to N replicas) would fan out to N
-     schedulers. A separate single-instance service sidesteps that; multi-box
-     needs a Postgres advisory lock / `FOR UPDATE SKIP LOCKED`.
-
-2. **Frequent oneshot (recommended).** Skip the daemon: a **1-minute systemd
-   timer** runs `node dist/jobs/run.js process-earnings-schedule`, which claims
-   due rows (`… where next_run_at <= now() FOR UPDATE SKIP LOCKED`), refreshes,
-   and reschedules. This keeps *exactly* the properties we like about Approach A —
-   its own short-lived process (zero main-thread impact), stateless between runs,
-   restart-safe, and naturally singleton per box — while adding per-event
-   scheduling. It's a strict evolution of the current runner, not a rewrite.
-
-**Recommendation:** if/when we adopt Approach B, do it as the **oneshot
-schedule-processor (option 2)**, not a long-running daemon. It answers the
-main-thread concern by construction: like every job today, it runs in its own
-process and exits.
+The full reasoning, and why the oneshot beats a daemon, is in
+`tmp/systems-design/liquidation-tracking.md`, which reuses the same pattern for
+position refresh.

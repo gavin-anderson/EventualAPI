@@ -3,7 +3,7 @@
     "_postman_id": "hl-api-0000-0000-0000-000000000001",
     "name": "hl-api",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Test collection for the hl-api service.\n\nSet the `baseUrl` variable (default http://localhost:8080). For the Account folder, paste a Privy access token into `privyToken` — those routes return 503 auth_not_configured until Privy env is set.\n\nWhat works when:\n- Ops (health/readyz/metrics): always.\n- Market (sample/perp/candles): once CH_PASSWORD is set (reads hl-ingest's ClickHouse over the tailnet).\n- Assets (list/detail): once Supabase creds are set AND the assets/earnings tables are seeded.\n- Account (session/profile/portfolio/positions): once Privy is wired."
+    "description": "Test collection for the hl-api service.\n\nSet the `baseUrl` variable (default http://localhost:8080). For the Account folder, paste a Privy access token into `privyToken`.\n\nWhat works when:\n- Ops (healthz/readyz/metrics): always.\n- Earnings + Assets: once Supabase creds are set and the tables are seeded.\n- Account (signup/session/profile/portfolio/positions): once Privy is wired. Portfolio additionally needs PRIVY_APP_SECRET for wallet resolution."
   },
   "item": [
     {
@@ -27,7 +27,7 @@
           }
         },
         {
-          "name": "Readiness (checks ClickHouse)",
+          "name": "Readiness (checks Supabase)",
           "request": {
             "method": "GET",
             "header": [],
@@ -40,7 +40,7 @@
                 "readyz"
               ]
             },
-            "description": "200 when ClickHouse is reachable; reports auth-bridge state. 503 if CH unreachable."
+            "description": "200 when Supabase is reachable; reports auth-bridge state."
           }
         },
         {
