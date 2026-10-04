@@ -14,9 +14,9 @@ import * as hub from "./priceHub.js";
  *                   {type:"pong"}, {type:"error", error, message}
  *
  * SCALING CAVEAT: subscription state and the poll loop are in-process. Behind >1
- * replica, each instance polls ClickHouse independently and fans out only to its
- * own clients (correct, but CH load scales with replica count). Horizontal scale
- * needs sticky WS routing or a shared pub/sub (Redis) fronting one poller.
+ * replica, each instance polls Hyperliquid independently and fans out only to its
+ * own clients (correct, but upstream HL calls scale with replica count).
+ * Horizontal scale needs sticky WS routing or a shared pub/sub fronting one poller.
  */
 
 const VALID_TICKER = /^[A-Za-z0-9.-]{1,15}$/;

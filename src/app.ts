@@ -3,8 +3,6 @@ import { requestLogger, metricsTimer } from "./middleware/requestContext.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { healthRouter } from "./routes/health.js";
 import { metricsRouter } from "./routes/metrics.js";
-import { marketRouter } from "./routes/market.js";
-import { marketsRouter } from "./routes/markets.js";
 import { assetsRouter } from "./routes/assets.js";
 import { earningsRouter } from "./routes/earnings.js";
 import { accountRouter } from "./routes/account.js";
@@ -26,9 +24,7 @@ export function createApp(): Express {
   app.use(metricsRouter);
 
   // Public + authenticated API, versioned under /v1.
-  app.use("/v1/markets", marketsRouter); // anonymous (merged browse: live price + metadata)
-  app.use("/v1/market", marketRouter);   // anonymous (raw per-coin market data)
-  app.use("/v1/assets", assetsRouter);   // anonymous
+  app.use("/v1/assets", assetsRouter);     // anonymous (asset catalogue)
   app.use("/v1/earnings", earningsRouter); // anonymous (upcoming earnings calendar)
   app.use("/v1", accountRouter);       // authenticated (requireAuth per-route)
 

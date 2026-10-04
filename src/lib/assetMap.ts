@@ -3,14 +3,13 @@ import { config } from "../config/env.js";
 
 /**
  * ticker → hl_coin resolution for the price WebSocket. The app subscribes by
- * ticker (its display key); ClickHouse `asset_ctx` is keyed on `coin` (hl_coin).
- * For the equity dex these are usually identical, but where `assets` records a
- * different `hl_coin` we honour it. Cached with a short TTL so a screen full of
- * subscribes doesn't hammer Supabase.
+ * ticker (its display key); Hyperliquid keys markets on the bare coin. For the
+ * equity dex these are usually identical, but where `assets` records a different
+ * `hl_coin` we honour it. Cached with a short TTL so a screen full of subscribes
+ * doesn't hammer Supabase.
  *
- * Unknown tickers fall back to identity (coin == ticker, dex == CH_DEX): this
- * keeps pricing working even when `assets` is sparse, matching how
- * /v1/market/perp/:coin queries ClickHouse by coin directly.
+ * Unknown tickers fall back to identity (coin == ticker, dex == HL_DEX), which
+ * keeps pricing working even when the `assets` catalogue is sparse.
  */
 
 export interface AssetInfo {
@@ -52,13 +51,13 @@ async function getMap(): Promise<Map<string, AssetInfo>> {
 
 /**
  * Resolve each requested ticker to its {coin, dex}. Every ticker resolves — a
- * miss falls back to identity (coin == ticker, dex == configured CH_DEX or null).
+ * miss falls back to identity (coin == ticker, dex == configured HL_DEX or null).
  */
 export async function resolveTickers(
   tickers: string[],
 ): Promise<Map<string, AssetInfo>> {
   const map = await getMap();
-  const fallbackDex = config.clickhouse.dex || null;
+  const fallbackDex = config.hyperliquid.dex || null;
   const out = new Map<string, AssetInfo>();
   for (const t of tickers) {
     const key = t.toUpperCase();

@@ -30,7 +30,7 @@ const jobs: Record<string, () => Promise<void>> = {
   "refresh-approaching": () => refreshImminentEarnings({ fromHours: 1, toHours: 24 }),
   //   Imminent: events in [~now, 1h] — every 5 min (escalated cadence).
   "refresh-imminent": () => refreshImminentEarnings({ fromHours: -0.25, toHours: 1 }),
-  // One-time/on-demand: backfill historical reactions from Stooq for rows ClickHouse
+  // One-time/on-demand: backfill historical reactions for report dates that predate
   // can't cover (pre-perp dates). Extra args are an optional ticker filter.
   "backfill-earnings-reactions": () => backfillEarningsReactions(process.argv.slice(3)),
 };

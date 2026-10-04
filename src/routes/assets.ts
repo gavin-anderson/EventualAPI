@@ -2,9 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import { badRequest, notFound } from "../lib/httpError.js";
-import { query } from "../lib/clickhouse.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { config } from "../config/env.js";
 
 export const assetsRouter = Router();
 
@@ -56,7 +54,8 @@ assetsRouter.get(
  *   - Next earnings event (date + time precision + expected EPS)
  *   - Polymarket beat odds
  *   - Past earnings history (EPS surprise + 24h price reaction)
- *   - Current mark price + timeframe price changes from ClickHouse
+ *
+ * No price data: the app reads marks from Hyperliquid directly.
  */
 assetsRouter.get(
   "/:ticker",
@@ -66,10 +65,8 @@ assetsRouter.get(
 
     const db = supabaseAdmin();
 
-    // Fetch asset + earnings data from Supabase in parallel with ClickHouse price
-    const [assetResult, priceRows] = await Promise.all([
-      db
-        .from("assets")
+    const assetResult = await db
+      .from("assets")
         .select(
           `id, dex, hl_coin, ticker, name, image_ref, kind,
            earnings_events (
@@ -89,12 +86,8 @@ assetsRouter.get(
           ascending: false,
           referencedTable: "earnings_history",
         })
-        .limit(1, { referencedTable: "earnings_odds" })
-        .single(),
-
-      // Current mark price from ClickHouse (non-fatal if CH unavailable)
-      fetchMarkPrice(ticker).catch(() => null),
-    ]);
+      .limit(1, { referencedTable: "earnings_odds" })
+      .single();
 
     if (assetResult.error || !assetResult.data) {
       throw notFound(`asset not found: ${ticker}`);
@@ -125,36 +118,6 @@ assetsRouter.get(
       nextEarnings: nextEvent,
       earningsOdds,
       earningsHistory: asset.earnings_history,
-      market: priceRows,
     });
   }),
 );
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-interface PriceRow {
-  mark_px: number;
-  as_of: string;
-}
-
-async function fetchMarkPrice(ticker: string) {
-  const db = config.clickhouse.database;
-  const dex = config.clickhouse.dex || undefined;
-  const dexFilter = dex ? "AND dex = {dex:String}" : "";
-  const params: Record<string, unknown> = { ticker };
-  if (dex) params.dex = dex;
-
-  // Join assets → coin via HL coin name matching ticker symbol
-  // hl_coin in asset_ctx matches the ticker for most HL perps (e.g. AAPL-PERP → AAPL)
-  const rows = await query<PriceRow>(
-    "asset_mark_price",
-    `SELECT argMax(mark_px, ts) AS mark_px, max(ts) AS as_of
-     FROM ${db}.asset_ctx
-     WHERE coin = {ticker:String}
-       AND ts > now() - INTERVAL 1 HOUR
-       ${dexFilter}
-     GROUP BY coin`,
-    params,
-  );
-  return rows[0] ?? null;
-}

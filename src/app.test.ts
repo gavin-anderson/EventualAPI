@@ -4,8 +4,8 @@ import { createApp } from "./app.js";
 
 /**
  * Smoke tests that don't require live upstreams. They cover the wiring that must
- * hold regardless of ClickHouse/Supabase/Privy: liveness, input validation, and
- * the auth bridge being dormant (503) until configured.
+ * hold regardless of Supabase/Privy: liveness, input validation, and the auth
+ * bridge being dormant (503) until configured.
  */
 let server: Server;
 let base: string;
@@ -41,8 +41,8 @@ describe("ops", () => {
 });
 
 describe("public read tier", () => {
-  it("GET /v1/market/sample?limit=0 -> 400 bad_request (validation before upstream)", async () => {
-    const res = await fetch(`${base}/v1/market/sample?limit=0`);
+  it("GET /v1/earnings?limit=0 -> 400 bad_request (validation before upstream)", async () => {
+    const res = await fetch(`${base}/v1/earnings?limit=0`);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("bad_request");
   });

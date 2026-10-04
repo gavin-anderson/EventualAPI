@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/errorHandler.js";
-import { pingClickHouse } from "../lib/clickhouse.js";
+import { supabaseAdmin } from "../lib/supabase.js";
 import { config } from "../config/env.js";
 
 export const healthRouter = Router();
@@ -11,21 +11,34 @@ healthRouter.get("/healthz", (_req, res) => {
 });
 
 /**
- * Readiness: can we actually serve traffic? Checks the upstream ClickHouse the
- * public read tier depends on. Reports (but does not fail on) the auth bridge
- * configuration state, since the service is intentionally usable anonymously.
+ * Readiness: can we actually serve traffic? Every read tier now goes to Supabase,
+ * so that is the dependency worth checking. Reports (but does not fail on) the
+ * auth bridge state, since the service is intentionally usable anonymously.
  */
 healthRouter.get(
   "/readyz",
   asyncHandler(async (_req, res) => {
-    const clickhouse = await pingClickHouse();
-    const ready = clickhouse;
-    res.status(ready ? 200 : 503).json({
-      status: ready ? "ok" : "degraded",
+    const supabase = await pingSupabase();
+    res.status(supabase ? 200 : 503).json({
+      status: supabase ? "ok" : "degraded",
       checks: {
-        clickhouse: clickhouse ? "ok" : "unreachable",
+        supabase: supabase ? "ok" : "unreachable",
         authBridge: config.auth.configured ? "configured" : "not_configured",
       },
     });
   }),
 );
+
+/** Cheapest possible round-trip that proves Supabase is reachable and granting. */
+async function pingSupabase(): Promise<boolean> {
+  if (!config.supabase.configured) return false;
+  try {
+    const { error } = await supabaseAdmin()
+      .from("assets")
+      .select("id", { head: true, count: "exact" })
+      .limit(1);
+    return !error;
+  } catch {
+    return false;
+  }
+}

@@ -12,7 +12,7 @@ export const earningsRouter = Router();
  *
  * Upcoming earnings calendar, shaped 1:1 to the app's `MarketEvent`. This is a
  * SUPABASE-ONLY read (earnings_events INNER JOIN assets) — deliberately no
- * ClickHouse / price data, so the app's Home feed paints instantly and prices
+ * price data, so the app's Home feed paints instantly and prices
  * are filled separately over the price WebSocket.
  *
  * Money (`epsEstimate`) is emitted as a STRING so the Swift client can decode it

@@ -1,7 +1,6 @@
 import { createApp } from "./app.js";
 import { config } from "./config/env.js";
 import { logger } from "./lib/logger.js";
-import { clickhouse } from "./lib/clickhouse.js";
 import { attachPriceWs } from "./ws/server.js";
 
 const app = createApp();
@@ -25,13 +24,8 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "shutting down");
   priceWs.close();
   for (const ws of priceWs.clients) ws.terminate();
-  server.close(async (err) => {
+  server.close((err) => {
     if (err) logger.error({ err }, "error during server close");
-    try {
-      await clickhouse.close();
-    } catch (e) {
-      logger.error({ err: e }, "error closing clickhouse client");
-    }
     process.exit(err ? 1 : 0);
   });
   // Hard cap so a hung connection can't block shutdown forever.

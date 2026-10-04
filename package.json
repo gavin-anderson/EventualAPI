@@ -19,7 +19,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@clickhouse/client": "^1.4.0",
     "@privy-io/server-auth": "^1.15.3",
     "@supabase/supabase-js": "^2.45.0",
     "dotenv": "^16.4.5",

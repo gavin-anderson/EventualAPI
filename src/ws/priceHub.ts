@@ -1,29 +1,27 @@
 import type { WebSocket } from "ws";
-import { query } from "../lib/clickhouse.js";
+import { fetchMarketQuotes } from "../lib/hyperliquid.js";
 import { config } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 import { resolveTickers } from "../lib/assetMap.js";
 
 /**
- * The price hub: a single shared poll loop over ClickHouse fanned out to all
- * subscribed WebSocket clients. State is per-process (see the multi-instance
- * caveat in ws/server.ts).
+ * The price hub: a single shared poll loop fanned out to all subscribed
+ * WebSocket clients. State is per-process (see the multi-instance caveat in
+ * ws/server.ts).
  *
  * - clients subscribe by TICKER; we resolve to `coin` and key everything on coin.
- * - one setInterval polls the UNION of subscribed coins in a single query.
+ * - one setInterval fetches EVERY market on the dex in a single Hyperliquid call
+ *   (`metaAndAssetCtxs`), so the upstream cost is flat no matter how many coins
+ *   or clients are subscribed.
  * - a quote is pushed only when the mark actually moves (push-on-change), and the
  *   current cached value is sent immediately on subscribe (current-on-subscribe).
  * - prices/changePct cross the wire as STRINGS (Decimal-safe on the client).
+ *
+ * `markPx` is used, never `midPx` — mark is the price HL liquidates against and
+ * the two differ.
  */
 
 const POLL_INTERVAL_MS = 2_000;
-
-interface QuoteRow {
-  coin: string;
-  mark: number;
-  prev: number;
-  as_of: string;
-}
 
 interface CoinState {
   mark: number;
@@ -78,49 +76,33 @@ function maybeStopTimer(): void {
   }
 }
 
-/** Poll the union of subscribed coins once and broadcast the ones that moved. */
+/** Fetch the whole dex once and broadcast the subscribed coins that moved. */
 async function pollOnce(): Promise<void> {
-  const coins = [...coinSubs.keys()];
-  if (coins.length === 0) return;
+  if (coinSubs.size === 0) return;
 
-  const dex = config.clickhouse.dex || undefined;
-  const params: Record<string, unknown> = { coins };
-  let dexFilter = "";
-  if (dex) {
-    dexFilter = "AND dex = {dex:String}";
-    params.dex = dex;
-  }
+  // One upstream call covers every market, so there is nothing to filter by
+  // request — we just ignore coins nobody is watching.
+  const quotes = await fetchMarketQuotes(config.hyperliquid.dex);
+  const asOf = new Date().toISOString();
 
-  const rows = await query<QuoteRow>(
-    "ws_price_poll",
-    `SELECT
-       coin,
-       argMax(mark_px, ts) AS mark,
-       argMin(mark_px, ts) AS prev,
-       max(ts)             AS as_of
-     FROM ${config.clickhouse.database}.asset_ctx
-     WHERE ts > now() - INTERVAL 1 DAY
-       AND coin IN ({coins:Array(String)})
-       ${dexFilter}
-     GROUP BY coin`,
-    params,
-  );
+  for (const coin of coinSubs.keys()) {
+    const q = quotes.get(coin);
+    if (!q) continue;
 
-  for (const r of rows) {
-    const mark = Number(r.mark);
-    const prev = Number(r.prev);
-    const changePct = prev > 0 ? (mark - prev) / prev : 0;
+    const mark = q.markPx;
+    const prev = q.prevDayPx;
+    const changePct = prev && prev > 0 ? (mark - prev) / prev : 0;
 
-    // Push-on-change: skip when neither price nor 24h-change moved. (Ignore as_of —
-    // ClickHouse's max(ts) advances every poll, so comparing it would push every tick.)
-    const previous = lastQuote.get(r.coin);
+    // Push-on-change: skip when neither price nor 24h-change moved. asOf is
+    // deliberately excluded — it advances every tick and would push every time.
+    const previous = lastQuote.get(coin);
     if (previous && previous.mark === mark && previous.changePct === changePct) continue;
 
-    const state: CoinState = { mark, changePct, asOf: r.as_of };
-    lastQuote.set(r.coin, state);
+    const state: CoinState = { mark, changePct, asOf };
+    lastQuote.set(coin, state);
 
-    const frame = quoteFrame(r.coin, state);
-    for (const ws of coinSubs.get(r.coin) ?? []) safeSend(ws, frame);
+    const frame = quoteFrame(coin, state);
+    for (const ws of coinSubs.get(coin) ?? []) safeSend(ws, frame);
   }
 }
 

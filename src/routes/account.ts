@@ -6,9 +6,8 @@ import { mintSupabaseSession } from "../lib/authBridge.js";
 import { upsertProfile } from "../lib/profiles.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { fetchClearinghouseState, fetchUserFills } from "../lib/hyperliquid.js";
-import { badRequest, serviceUnavailable, notFound } from "../lib/httpError.js";
+import { badRequest, notFound } from "../lib/httpError.js";
 import { TtlCache } from "../lib/cache.js";
-import { config } from "../config/env.js";
 
 export const accountRouter = Router();
 
@@ -64,9 +63,8 @@ accountRouter.get(
 /**
  * GET /v1/portfolio — AUTHENTICATED.
  *
- * Live HL clearinghouseState via the EU proxy, enriched with:
- *   - Asset metadata (name, symbol, logo) joined from Supabase assets table
- *   - 24h account-value change computed from account_value_snapshots
+ * Live HL clearinghouseState, enriched with asset metadata (name, symbol, logo)
+ * joined from the Supabase assets table.
  *
  * Mapping:
  *   Account Value  = marginSummary.accountValue
@@ -77,10 +75,6 @@ accountRouter.get(
   "/portfolio",
   requireAuth,
   asyncHandler(async (req, res) => {
-    if (!config.hyperliquid.configured) {
-      throw serviceUnavailable("hl_not_configured", "Hyperliquid proxy not configured");
-    }
-
     const identity = req.identity!;
     const db = supabaseAdmin();
 
@@ -92,10 +86,9 @@ accountRouter.get(
 
     const cacheKey = `portfolio:${wallet}`;
     const result = await portfolioCache.getOrSet(cacheKey, PORTFOLIO_CACHE_TTL, async () => {
-      const [state, assetMap, snapshot] = await Promise.all([
+      const [state, assetMap] = await Promise.all([
         fetchClearinghouseState(wallet),
         fetchAssetMap(db),
-        fetchYesterdaySnapshot(db, identity.privyDid),
       ]);
 
       const { marginSummary, assetPositions } = state;
@@ -105,16 +98,6 @@ accountRouter.get(
         0,
       );
       const cashValue = accountValue - positionValue;
-
-      // 24h change vs yesterday's snapshot
-      let change24h: { usd: number; pct: number } | null = null;
-      if (snapshot) {
-        const delta = accountValue - Number(snapshot.account_value);
-        change24h = {
-          usd: Number(delta.toFixed(2)),
-          pct: Number(((delta / Number(snapshot.account_value)) * 100).toFixed(4)),
-        };
-      }
 
       const positions = assetPositions
         .filter((ap) => Number(ap.position.szi) !== 0)
@@ -141,7 +124,6 @@ accountRouter.get(
         accountValue,
         positionValue: Number(positionValue.toFixed(2)),
         cashValue: Number(cashValue.toFixed(2)),
-        change24h,
         positions,
         asOf: new Date().toISOString(),
       };
@@ -160,7 +142,7 @@ const closedSchema = z.object({
 /**
  * GET /v1/positions/closed — AUTHENTICATED.
  *
- * Derives closed positions from HL userFillsByTime via the EU proxy.
+ * Derives closed positions from HL userFillsByTime.
  * Returns fills that include realized PnL (closedPnl != "0"), grouped and
  * summarised by coin. Covers the last ?days= calendar days (max 90).
  */
@@ -168,10 +150,6 @@ accountRouter.get(
   "/positions/closed",
   requireAuth,
   asyncHandler(async (req, res) => {
-    if (!config.hyperliquid.configured) {
-      throw serviceUnavailable("hl_not_configured", "Hyperliquid proxy not configured");
-    }
-
     const parsed = closedSchema.safeParse(req.query);
     if (!parsed.success) {
       throw badRequest(parsed.error.issues.map((i) => i.message).join("; "));
@@ -254,18 +232,4 @@ async function fetchAssetMap(
     map[row.hl_coin] = { ticker: row.ticker, name: row.name, imageRef: row.image_ref };
   }
   return map;
-}
-
-async function fetchYesterdaySnapshot(
-  db: ReturnType<typeof supabaseAdmin>,
-  userId: string,
-): Promise<{ account_value: number } | null> {
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-  const { data } = await db
-    .from("account_value_snapshots")
-    .select("account_value")
-    .eq("user_id", userId)
-    .eq("captured_on", yesterday)
-    .single();
-  return (data as { account_value: number } | null);
 }

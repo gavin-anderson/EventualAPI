@@ -26,7 +26,7 @@ App                         hl-api                         Supabase
  │                                            RLS: id = jwt.sub
 ```
 
-For BFF-proprietary calls (ClickHouse market data, per-user Hyperliquid later),
+For BFF-proprietary calls (earnings data, per-user Hyperliquid reads),
 the app keeps sending the **Privy** token to hl-api; for direct Supabase CRUD +
 Realtime it uses the **minted Supabase** token.
 

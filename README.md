@@ -1,16 +1,21 @@
 # hl-api
 
 API service for the Hyperliquid portfolio/earnings app. Sibling to `hl-ingest`
-(which owns market-data ingestion into ClickHouse). `hl-api` serves the app:
+(which owns market-data ingestion into ClickHouse — now being retired). `hl-api`
+serves the app:
 
-- **Anonymous, read-only** market data read from `hl-ingest`'s ClickHouse.
+- **Anonymous, read-only** earnings calendar and asset catalogue from Supabase.
 - **Authenticated** user-scoped resources via the **Privy → Supabase auth bridge**
   (scaffolded; dormant until Privy/Supabase secrets are set).
 
 The app talks **directly to Supabase** (under RLS) for simple CRUD + Realtime, and
-to `hl-api` for anything proprietary (ClickHouse market data, per-user Hyperliquid
-later). Trading is out of scope. `hl-ingest` is **not modified** by this service —
-its ClickHouse is a **read-only upstream**.
+to `hl-api` for anything proprietary (earnings data, per-user Hyperliquid reads).
+Trading is out of scope — the app signs and submits orders itself.
+
+Market prices come from Hyperliquid's public `/info` directly (no proxy). The
+ClickHouse-backed market routes were removed; the only remaining ClickHouse
+consumers are `ws/priceHub` and the earnings-history reaction calculation, both
+pending a re-point.
 
 ## Stack
 
@@ -19,21 +24,26 @@ TypeScript · Node ≥20 · Express · `@clickhouse/client` · `supabase-js` ·
 
 ## Endpoints
 
-| Method | Path                  | Auth          | Purpose                                                |
-| ------ | --------------------- | ------------- | ------------------------------------------------------ |
-| GET    | `/healthz`            | none          | Liveness.                                              |
-| GET    | `/readyz`             | none          | Readiness (pings ClickHouse; reports auth-bridge state).|
-| GET    | `/metrics`            | none          | Prometheus metrics (scraped by Alloy).                 |
-| GET    | `/v1/market/sample`   | **anonymous** | Latest snapshot per coin from ClickHouse. `?coin= &dex= &limit=`. |
-| POST   | `/v1/auth/session`    | Privy bearer  | Verify Privy token → mint a Supabase session JWT.      |
-| GET    | `/v1/profile`         | Privy bearer  | Verified id + wallet; lazily upserts the profile.      |
+| Method | Path                       | Auth          | Purpose                                                |
+| ------ | -------------------------- | ------------- | ------------------------------------------------------ |
+| GET    | `/healthz`                 | none          | Liveness.                                              |
+| GET    | `/readyz`                  | none          | Readiness (pings Supabase; reports auth-bridge state). |
+| GET    | `/metrics`                 | none          | Prometheus metrics (scraped by Alloy).                 |
+| GET    | `/v1/earnings`             | **anonymous** | Upcoming earnings calendar, shaped to the app's `MarketEvent`. `?from= &to= &dex= &limit=`. |
+| GET    | `/v1/assets`               | **anonymous** | Paginated asset catalogue. `?dex= &kind= &limit= &offset=`. |
+| GET    | `/v1/assets/:ticker`       | **anonymous** | Asset detail: metadata + next earnings + odds + history. |
+| WS     | `/v1/ws/prices`            | **anonymous** | Price stream; subscribe by ticker.                     |
+| POST   | `/v1/auth/session`         | Privy bearer  | Verify Privy token → mint a Supabase session JWT.      |
+| GET    | `/v1/profile`              | Privy bearer  | Verified id + wallet; lazily upserts the profile.      |
+| GET    | `/v1/portfolio`            | Privy bearer  | Live HL account value + open positions.                |
+| GET    | `/v1/positions/closed`     | Privy bearer  | Closed positions from HL fills. `?days=`               |
 
 Auth routes return `503 auth_not_configured` until the bridge is enabled.
 
 ## Quick start
 
 ```bash
-cp .env.example .env     # fill in CH_URL (+ creds) at minimum
+cp .env.example .env     # fill in SUPABASE_* at minimum
 npm install
 npm run dev              # tsx watch, http://localhost:8080
 ```
@@ -49,11 +59,10 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm test`.
 ## Configuration
 
 See `.env.example`. The only thing needed for the anonymous read tier is the
-ClickHouse connection:
+Supabase connection (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`).
 
-- `CH_URL` — `http://<hl-ingest tailnet IP>:8123` (HTTP interface; native `:9000`
-  is loopback-only on the hl-ingest box). e.g. `http://100.x.y.z:8123`.
-- `CH_DATABASE` (`hl`), `CH_USERNAME`, `CH_PASSWORD`, optional `CH_DEX`.
+`CH_*` is still read by the two remaining ClickHouse consumers (`ws/priceHub`,
+`sync-earnings-history`) and goes away once those are re-pointed.
 
 The auth bridge turns on only when **both** Supabase (`SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`) and Privy (`PRIVY_APP_ID`,

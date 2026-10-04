@@ -1,7 +1,7 @@
 /**
  * Free, key-free daily-close fetcher via Yahoo Finance's v8 chart API. Used only
  * for the ONE-TIME historical earnings-reaction backfill (dates that predate the
- * Hyperliquid perp market, so ClickHouse has no candles). Unofficial endpoint — do
+ * Hyperliquid perp market, so HL has no candles). Unofficial endpoint — do
  * NOT build product features on this; it's a bootstrap for backfilling.
  *
  * (Stooq's free CSV was the original choice but is now behind a JS proof-of-work
