@@ -82,6 +82,8 @@ describe("protected routes reject unauthenticated callers", () => {
     ["GET", "/v1/watchlist"],
     ["PUT", "/v1/watchlist/NVDA"],
     ["DELETE", "/v1/watchlist/NVDA"],
+    ["GET", "/v1/feed"],
+    ["GET", "/v1/feed/sentiment?coin=NVDA"],
   ];
 
   for (const [method, path, body] of protectedRoutes) {

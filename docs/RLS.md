@@ -53,6 +53,7 @@ uuid and ours is text, so it would be null. Kept correct even though unused.
 | `username_claims` | all | — | service role |
 | `positions` | rows **with a take**, non-hidden, public columns | — | service role |
 | `watchlist` | — | own rows | service role |
+| `feed_items` (view) | — | — | read-only, service role |
 | `assets`, `earnings_*` | all | — | service role |
 | `account_value_snapshots` | — | own rows | service role |
 
@@ -74,6 +75,12 @@ of consenting to reveal side and size.
 
 **`watchlist`** is owner-only. Weaker signal than a position, but still interest
 the user never published — same rule.
+
+`feed_items` is a view over `positions` joined to `profiles`, flattening each
+position's open and close takes into separate posts. Declared
+`security_invoker = true`, so the underlying policies still apply if a client
+ever reads it directly — and revoked from `anon`/`authenticated` regardless,
+since a view hands over exactly the columns it selects.
 
 `username_claims` is public-read because resolving `/r/<username>` is a public
 operation. It is append-only: rows retire via `released_at` and are never

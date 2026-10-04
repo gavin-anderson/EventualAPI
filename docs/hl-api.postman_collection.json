@@ -365,6 +365,79 @@
       ]
     },
     {
+      "name": "Feed (auth)",
+      "description": "Reading the position feed — the counterpart to POST /v1/takes. Only positions carrying a take appear, since posting is what publishes a position.",
+      "item": [
+        {
+          "name": "Feed (a ticker's room)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/feed?coin={{ticker}}&limit=50&offset=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "coin",
+                  "value": "{{ticker}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "AUTHENTICATED. Newest trade first.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nA position with both an open and a close take appears as TWO items — they are two posts made at different times. The close one carries realizedPnl and the exit price."
+          }
+        },
+        {
+          "name": "Feed sentiment (long/short split)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/feed/sentiment?coin={{ticker}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "feed",
+                "sentiment"
+              ],
+              "query": [
+                {
+                  "key": "coin",
+                  "value": "{{ticker}}"
+                }
+              ]
+            },
+            "description": "AUTHENTICATED. Long/short split for a room.\n\nCounts PUBLISHED positions only, so this is sentiment among people who posted — not among all holders. `basis: published_positions` says so in the response. The broader number would need the server to mirror every user's positions.\n\nA position with two takes counts once."
+          }
+        }
+      ]
+    },
+    {
       "name": "Watchlist (auth)",
       "description": "The ★ toggle. All idempotent.",
       "item": [

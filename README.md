@@ -32,6 +32,8 @@ TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` �
 | POST   | `/v1/trades/open`               | Privy bearer  | Record a verified opening trade; opens a take window.|
 | POST   | `/v1/trades/close`              | Privy bearer  | Record the close; opens a second take window.        |
 | POST   | `/v1/takes`                     | Privy bearer  | Post a take about a trade. Optional.                 |
+| GET    | `/v1/feed`                      | Privy bearer  | The position feed. `?coin= &user= &limit= &offset=`  |
+| GET    | `/v1/feed/sentiment`            | Privy bearer  | Long/short split among published positions. `?coin=` |
 | GET    | `/v1/watchlist`                 | Privy bearer  | Starred tickers.                                     |
 | PUT    | `/v1/watchlist/:ticker`         | Privy bearer  | Star. Idempotent.                                    |
 | DELETE | `/v1/watchlist/:ticker`         | Privy bearer  | Un-star. Idempotent.                                 |
