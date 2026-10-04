@@ -18,19 +18,28 @@ TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` �
 
 ## Endpoints
 
-| Method | Path                       | Auth          | Purpose                                                |
-| ------ | -------------------------- | ------------- | ------------------------------------------------------ |
-| GET    | `/healthz`                 | none          | Liveness.                                              |
-| GET    | `/readyz`                  | none          | Readiness (pings Supabase; reports auth-bridge state). |
-| GET    | `/metrics`                 | none          | Prometheus metrics (scraped by Alloy).                 |
-| GET    | `/v1/earnings`             | **anonymous** | Upcoming earnings calendar, shaped to the app's `MarketEvent`. `?from= &to= &dex= &limit=`. |
-| GET    | `/v1/assets`               | **anonymous** | Paginated asset catalogue. `?dex= &kind= &limit= &offset=`. |
-| GET    | `/v1/assets/:ticker`       | **anonymous** | Asset detail: metadata + next earnings + odds + history. |
-| WS     | `/v1/ws/prices`            | **anonymous** | Price stream; subscribe by ticker.                     |
-| POST   | `/v1/auth/session`         | Privy bearer  | Verify Privy token → mint a Supabase session JWT.      |
-| GET    | `/v1/profile`              | Privy bearer  | Verified id + wallet; lazily upserts the profile.      |
-| GET    | `/v1/portfolio`            | Privy bearer  | Live HL account value + open positions.                |
-| GET    | `/v1/positions/closed`     | Privy bearer  | Closed positions from HL fills. `?days=`               |
+| Method | Path                            | Auth          | Purpose                                              |
+| ------ | ------------------------------- | ------------- | ---------------------------------------------------- |
+| GET    | `/healthz`                      | none          | Liveness.                                            |
+| GET    | `/readyz`                       | none          | Readiness (pings Supabase; reports auth-bridge state).|
+| GET    | `/metrics`                      | none          | Prometheus metrics.                                  |
+| GET    | `/v1/earnings`                  | **anonymous** | Earnings calendar, shaped to the app's `MarketEvent`. `?from= &to= &dex= &limit=`. |
+| GET    | `/v1/earnings/:ticker`          | **anonymous** | One ticker: next event + past results + beat odds.   |
+| POST   | `/v1/auth/signup`               | Privy bearer  | Sign-up and every-launch bootstrap. Idempotent.      |
+| GET    | `/v1/profile`                   | Privy bearer  | The caller's own profile.                            |
+| GET    | `/v1/profile/username/check`    | Privy bearer  | Availability hint. `?name=`                          |
+| POST   | `/v1/profile/username`          | Privy bearer  | Atomic claim.                                        |
+| POST   | `/v1/trades/open`               | Privy bearer  | Record a verified opening trade; opens a take window.|
+| POST   | `/v1/trades/close`              | Privy bearer  | Record the close; opens a second take window.        |
+| POST   | `/v1/takes`                     | Privy bearer  | Post a take about a trade. Optional.                 |
+| GET    | `/v1/watchlist`                 | Privy bearer  | Starred tickers.                                     |
+| PUT    | `/v1/watchlist/:ticker`         | Privy bearer  | Star. Idempotent.                                    |
+| DELETE | `/v1/watchlist/:ticker`         | Privy bearer  | Un-star. Idempotent.                                 |
+
+**Scope:** called by our own mobile app and our own scheduled jobs. Not a public
+API. Every endpoint has one of those two callers; anything without one was
+removed — including the price stream, the asset catalogue and the portfolio
+passthroughs, all of which the app does against Hyperliquid directly.
 
 Auth routes return `503 auth_not_configured` until the bridge is enabled.
 
@@ -55,9 +64,10 @@ Other scripts: `npm run typecheck`, `npm run lint`, `npm test`.
 See `.env.example`. The anonymous read tier needs only `SUPABASE_URL` and
 `SUPABASE_SERVICE_ROLE_KEY`.
 
-The auth bridge needs Supabase (plus `SUPABASE_JWT_SECRET`) **and** Privy
-(`PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`). `PRIVY_APP_SECRET` is separate and
-only enables embedded-wallet resolution — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
+The auth bridge needs Supabase **and** Privy (`PRIVY_APP_ID`,
+`PRIVY_VERIFICATION_KEY`). `PRIVY_APP_SECRET` is separate and only enables
+embedded-wallet resolution. No JWT secret: the app never talks to Supabase
+directly, so no session is minted — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
 
 ## Supabase
 

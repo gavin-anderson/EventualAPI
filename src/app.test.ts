@@ -47,10 +47,17 @@ describe("ops", () => {
 });
 
 describe("public read tier", () => {
-  it("GET /v1/profiles with no ids -> 400 (anonymous, validates before upstream)", async () => {
-    const res = await fetch(`${base}/v1/profiles`);
+  it("GET /v1/earnings/:ticker rejects a junk ticker", async () => {
+    const res = await fetch(`${base}/v1/earnings/not%20a%20ticker`);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("bad_request");
+  });
+
+  it("GET /v1/earnings/:ticker accepts numeric tickers", async () => {
+    // XYZ100/SP500/JP225/KR200/H100 are real markets the old alpha-only regex
+    // rejected. 404 is fine here (sparse catalogue); 400 would be the bug.
+    const res = await fetch(`${base}/v1/earnings/XYZ100`);
+    expect(res.status).not.toBe(400);
   });
 
   it("GET /v1/earnings?limit=0 -> 400 bad_request (validation before upstream)", async () => {
@@ -66,15 +73,15 @@ describe("protected routes reject unauthenticated callers", () => {
 
   const protectedRoutes: Array<[string, string, unknown?]> = [
     ["GET", "/v1/profile"],
-    ["POST", "/v1/auth/session"],
     ["POST", "/v1/auth/signup"],
     ["GET", "/v1/profile/username/check?name=someone"],
     ["POST", "/v1/profile/username", { username: "someone" }],
-    ["GET", "/v1/portfolio"],
-    ["GET", "/v1/positions/closed"],
     ["POST", "/v1/trades/open", { cloid: "0xdeadbeefdeadbeef" }],
     ["POST", "/v1/trades/close", { cloid: "0xdeadbeefdeadbeef" }],
     ["POST", "/v1/takes", { cloid: "0xdeadbeefdeadbeef", text: "a take" }],
+    ["GET", "/v1/watchlist"],
+    ["PUT", "/v1/watchlist/NVDA"],
+    ["DELETE", "/v1/watchlist/NVDA"],
   ];
 
   for (const [method, path, body] of protectedRoutes) {

@@ -31,3 +31,11 @@ skills-lock.json
 # Supabase CLI project — DB is managed via the MCP/dashboard, not the CLI.
 # config.toml holds the project ref/URLs; migrations are applied to the live DB.
 supabase/
+
+# Postman VS Code extension working state. It mirrors
+# docs/hl-api.postman_collection.json into a cloud-synced directory copy, so
+# committing it would version the same collection twice and pin a workspace id.
+# If the directory format ever becomes the source of truth, un-ignore these and
+# delete the single-file JSON instead.
+docs/.postman/
+docs/postman/

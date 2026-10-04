@@ -20,8 +20,6 @@ const schema = z.object({
   // Supabase (optional until the auth bridge is wired)
   SUPABASE_URL: z.string().url().optional().or(z.literal("")),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().or(z.literal("")),
-  SUPABASE_JWT_SECRET: z.string().optional().or(z.literal("")),
-  SESSION_JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
   // Privy (optional until the auth bridge is wired)
   PRIVY_APP_ID: z.string().optional().or(z.literal("")),
@@ -59,26 +57,21 @@ function nonEmpty(v: string | undefined): v is string {
  * incoming identity token). Until BOTH are fully configured, auth routes report
  * not-configured instead of half-working.
  */
+/** Service role only — nothing mints session JWTs, so no JWT secret. */
 const supabaseConfigured =
-  nonEmpty(e.SUPABASE_URL) &&
-  nonEmpty(e.SUPABASE_SERVICE_ROLE_KEY) &&
-  nonEmpty(e.SUPABASE_JWT_SECRET);
+  nonEmpty(e.SUPABASE_URL) && nonEmpty(e.SUPABASE_SERVICE_ROLE_KEY);
 
 const privyConfigured =
   nonEmpty(e.PRIVY_APP_ID) && nonEmpty(e.PRIVY_VERIFICATION_KEY);
 
-/**
- * Wallet resolution calls Privy's API, which needs the app secret — the access
- * token carries no wallet. Tracked separately so sign-in can work while wallet
- * resolution is unconfigured, and the API can say which.
- */
+/** Separate flag so sign-in can work while wallet resolution is unconfigured. */
 const privyWalletResolution =
   nonEmpty(e.PRIVY_APP_ID) && nonEmpty(e.PRIVY_APP_SECRET);
 
 /**
- * PRIVY_VERIFICATION_KEY is an ES256 public key, not the app id — easy to
- * confuse, since both come from the same dashboard page. Getting it wrong 401s
- * every request with nothing in the logs, so fail at startup instead.
+ * The verification key is an ES256 public key, not the app id — easy to confuse,
+ * both come from the same dashboard page. Getting it wrong 401s every request
+ * silently, so fail at startup instead.
  */
 if (nonEmpty(e.PRIVY_VERIFICATION_KEY)) {
   const key = e.PRIVY_VERIFICATION_KEY.trim();
@@ -110,8 +103,6 @@ export const config = {
     configured: supabaseConfigured,
     url: e.SUPABASE_URL || "",
     serviceRoleKey: e.SUPABASE_SERVICE_ROLE_KEY || "",
-    jwtSecret: e.SUPABASE_JWT_SECRET || "",
-    sessionTtlSeconds: e.SESSION_JWT_TTL_SECONDS,
   },
 
   privy: {

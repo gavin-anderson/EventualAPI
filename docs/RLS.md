@@ -1,97 +1,102 @@
-# Access model & RLS
+# Access model
 
-## The trap, first
+## How access actually works
 
-This project's **default privileges grant every new table in `public` the full
+**Only the service role ever connects.** The app talks to hl-api; hl-api talks to
+Supabase with the service role, which bypasses RLS. No client holds the anon key,
+and no session JWT is minted.
+
+So the real access control is *"only the server has credentials"*, and every
+check that matters lives in the API layer — ticker normalisation, username rules,
+take windows, trade verification. None of those are expressible as row
+policies anyway.
+
+The RLS policies below are therefore **inert today**: nothing connects as `anon`
+or `authenticated`. They are kept as defence in depth, and because they would
+become load-bearing the moment any client read Supabase directly.
+
+## The trap
+
+Default privileges on this project grant **every new table in `public` the full
 privilege set to `anon` and `authenticated`** — including TRUNCATE, which RLS
-cannot restrict. So RLS is the only control, and it is opt-in per table.
+cannot restrict.
 
-Every new table needs three things, not one:
+Latent rather than live, since neither role is reachable. But it means RLS is the
+only barrier, and it is opt-in per table. So every new table gets three things:
 
 ```sql
 alter table public.x enable row level security;
 -- ...policies for exactly the commands intended...
 revoke all on public.x from anon, authenticated;
-grant select (...) on public.x to anon, authenticated;
+grant select (...) on public.x to anon, authenticated;   -- only if public
 ```
 
-The `revoke` looks redundant and isn't. Without it the table arrives fully
-granted. A fix for the project-wide defaults is written but not applied:
+The `revoke` looks redundant and isn't — without it the table arrives fully
+granted. A project-wide fix is written but unapplied:
 `supabase/migrations/99999999999999_fix_overbroad_table_privileges.NOT_APPLIED.sql`.
+It became safe to apply once the app stopped using the anon key, since nothing
+could break.
 
 ## Identity
 
-The stable user id is the **Privy DID** (`did:privy:abc123`). It is the
-`profiles` primary key and the `sub` of the minted Supabase JWT.
+The stable user id is the **Privy DID** (`did:privy:abc123`), which is the
+`profiles` primary key.
 
-Ownership checks use `auth.jwt() ->> 'sub'`, **never `auth.uid()`** — that casts
-`sub` to uuid, and ours is text, so it would be null. This applies to every
-user-scoped table.
+Policies use `auth.jwt() ->> 'sub'`, **never `auth.uid()`** — that casts `sub` to
+uuid and ours is text, so it would be null. Kept correct even though unused.
 
-## Per-table access
+## Per-table
 
-### `profiles`
+| Table | Public read | Owner read | Writes |
+| --- | --- | --- | --- |
+| `profiles` | `id, username, image_ref, display_name, created_at` | — | service role |
+| `username_claims` | all | — | service role |
+| `positions` | rows **with a take**, non-hidden, public columns | — | service role |
+| `watchlist` | — | own rows | service role |
+| `assets`, `earnings_*` | all | — | service role |
+| `account_value_snapshots` | — | own rows | service role |
 
-| Actor | Read | Write |
-| --- | --- | --- |
-| `anon`, `authenticated` | `id, username, image_ref, display_name, created_at` | — |
-| `authenticated` | (as above) | `display_name`, `image_ref` on own row |
-| `service_role` | all | all |
+Three of those encode a product rule rather than a convention:
 
-Column-scoped deliberately. A Hyperliquid address is enough to pull a user's
-entire position history from the chain, so a public `wallet_address` would link
-a username to a complete trading record they never chose to share. `region` and
-`eligibility` are likewise private.
+**`profiles`** is column-scoped. A Hyperliquid address is enough to pull a
+user's entire position history from the chain, so a public `wallet_address` would
+link a username to a complete trading record they never chose to share.
+`region` and `eligibility` are private for the same reason.
 
-Writes are column-scoped because RLS is row-level and cannot answer a
-column-level question: the old blanket UPDATE grant let a user PATCH their own
-row and set *any* field, `wallet_address` and `username` included.
-
-### `username_claims`
-
-Public read, service-role write. Append-only namespace: rows are retired via
-`released_at`, never deleted, so a released username can never be reassigned.
-That matters because the username doubles as the referral code.
-
-### `positions`
-
-| Actor | Read | Write |
-| --- | --- | --- |
-| `anon`, `authenticated` | rows **with a take**, non-hidden, public columns only | — |
-| `service_role` | all | all |
-
-The policy *is* the privacy model:
+**`positions`** is only readable once it carries a take:
 
 ```sql
 using (hidden_at is null and (open_take is not null or close_take is not null))
 ```
 
-A position nobody posted about was never published — posting a take is the act
-of consenting to reveal side and size. `wallet_address` and the cloids are
-excluded from the public grant.
+A position nobody posted about was never published. Posting a take *is* the act
+of consenting to reveal side and size.
 
-### Reference tables
+**`watchlist`** is owner-only. Weaker signal than a position, but still interest
+the user never published — same rule.
 
-`assets`, `earnings_events`, `earnings_history`, `earnings_odds` — public read,
-service-role write. `account_value_snapshots` — owner read only
-(`user_id = auth.jwt() ->> 'sub'`), service-role write.
+`username_claims` is public-read because resolving `/r/<username>` is a public
+operation. It is append-only: rows retire via `released_at` and are never
+deleted, so a released username can never be reassigned.
 
 ## Keys
 
-- **service role key**: server-only, bypasses RLS. Never reaches the app.
-- **anon key**: ships inside the app, so treat it as public. Everything it can
-  reach is effectively public.
-- **minted session JWT**: short-lived, `sub` = Privy DID, subject to RLS.
+- **service role key** — server-only, bypasses RLS. The only key in use.
+- **anon key** — not used by anything. Does not ship in the app.
+- No session JWTs. See [AUTH_BRIDGE.md](AUTH_BRIDGE.md).
 
 ## Verifying
 
+Column grants are invisible in `information_schema.table_privileges` — use
+`column_privileges`:
+
 ```sql
-set role anon;
-select count(*) from public.profiles;            -- allowed (public columns)
-select wallet_address from public.profiles;      -- ERROR 42501
-insert into public.profiles (id) values ('x');   -- rejected
-reset role;
+select table_name, grantee, string_agg(privilege_type, ', ')
+  from information_schema.table_privileges
+ where table_schema = 'public' and grantee in ('anon','authenticated')
+ group by table_name, grantee;
 ```
 
-Column grants are not visible in `information_schema.table_privileges`; use
-`information_schema.column_privileges`.
+Expect SELECT only, and nothing at all on `watchlist` beyond the owner policy.
+Any INSERT, DELETE or TRUNCATE there is the trap above resurfacing on a table
+whose migration forgot its `revoke`.

@@ -277,17 +277,3 @@ export async function resolveReferralCode(raw: string): Promise<string | null> {
   if (error) throw new Error(`referral code lookup failed: ${error.message}`);
   return (data as { user_id: string } | null)?.user_id ?? null;
 }
-
-/** Public profiles by id, for feed author names. Never the wallet. */
-export async function publicProfiles(
-  ids: string[],
-): Promise<Array<Pick<Profile, "id" | "username" | "image_ref">>> {
-  if (ids.length === 0) return [];
-  const db = supabaseAdmin();
-  const { data, error } = await db
-    .from("profiles")
-    .select("id, username, image_ref")
-    .in("id", ids);
-  if (error) throw new Error(`profile lookup failed: ${error.message}`);
-  return (data as Array<Pick<Profile, "id" | "username" | "image_ref">>) ?? [];
-}

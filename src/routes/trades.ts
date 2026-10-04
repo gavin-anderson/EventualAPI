@@ -11,12 +11,9 @@ import { config } from "../config/env.js";
 export const tradesRouter = Router();
 
 /**
- * Trade + take endpoints. These are *notifications*, not the trade path — the
- * app submits orders to Hyperliquid itself, then reports the order id here so we
- * can verify it and record what actually happened. Side, size and price always
- * come from HL's fills, never the request body.
- *
- * All idempotent on the client order id.
+ * Trade notifications, not the trade path: the app submits to Hyperliquid
+ * itself, then reports the order id so we can verify it. Side, size and price
+ * come from HL's fills, never the request body. All idempotent on the cloid.
  *
  * PREREQUISITE: the app must attach a `cloid`. `HLClient.orderAction` supports
  * it (the `c` field) but `placeOrder` passes nil, so nothing here works yet.

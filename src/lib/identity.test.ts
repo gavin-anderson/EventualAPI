@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeUsername, usernameProblem, isReserved } from "./usernames.js";
+import { normalizeTicker } from "./watchlist.js";
 
 describe("usernames", () => {
   it("normalize to lowercase, stripping disallowed characters", () => {
@@ -52,6 +53,25 @@ describe("username as referral code", () => {
     // These would collide with routes if they ever became /r/<name>.
     for (const n of ["api", "admin", "signup", "profile"]) {
       expect(usernameProblem(n)).not.toBeNull();
+    }
+  });
+});
+
+describe("watchlist tickers", () => {
+  it("accepts the numeric tickers that actually exist", () => {
+    // An alpha-only pattern would reject all five; these are real markets.
+    for (const t of ["XYZ100", "SP500", "JP225", "KR200", "H100"]) {
+      expect(normalizeTicker(t)).toBe(t);
+    }
+  });
+
+  it("uppercases and trims", () => {
+    expect(normalizeTicker("  nvda ")).toBe("NVDA");
+  });
+
+  it("rejects junk rather than storing it", () => {
+    for (const t of ["", "  ", "a".repeat(16), "NV DA", "NVDA;--", "NV-DA"]) {
+      expect(normalizeTicker(t)).toBeNull();
     }
   });
 });

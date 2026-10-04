@@ -1,7 +1,6 @@
 import { createApp } from "./app.js";
 import { config } from "./config/env.js";
 import { logger } from "./lib/logger.js";
-import { attachPriceWs } from "./ws/server.js";
 
 const app = createApp();
 
@@ -16,14 +15,9 @@ const server = app.listen(config.port, () => {
   );
 });
 
-// Anonymous price stream on /v1/ws/prices, sharing the HTTP server.
-const priceWs = attachPriceWs(server);
-
-/** Graceful shutdown: stop accepting connections, then close upstreams. */
-async function shutdown(signal: string): Promise<void> {
+/** Graceful shutdown: stop accepting connections, then exit. */
+function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
-  priceWs.close();
-  for (const ws of priceWs.clients) ws.terminate();
   server.close((err) => {
     if (err) logger.error({ err }, "error during server close");
     process.exit(err ? 1 : 0);
@@ -32,8 +26,8 @@ async function shutdown(signal: string): Promise<void> {
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 
-process.on("SIGTERM", () => void shutdown("SIGTERM"));
-process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("unhandledRejection", (reason) => {
   logger.error({ err: reason }, "unhandled promise rejection");
 });
