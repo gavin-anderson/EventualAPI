@@ -96,6 +96,22 @@ export interface HlFill {
    * charging one (see tmp/systems-design/referrals.md).
    */
   builderFee?: string;
+  /**
+   * Present only on fills that were part of a liquidation.
+   *
+   * CAREFUL: its presence does NOT mean this wallet was liquidated. A fill on
+   * your account carrying this usually means you were the counterparty who
+   * absorbed someone else's position — `dir: "Open …"`, `closedPnl: 0`, and
+   * `liquidatedUser` set to a different address.
+   *
+   * This wallet was liquidated only when `liquidatedUser` equals it. Verified
+   * from both sides against live fills, 2026-10-04.
+   */
+  liquidation?: {
+    liquidatedUser: string;
+    markPx: string;
+    method: string;
+  };
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────

@@ -22,6 +22,9 @@ import { logger } from "./logger.js";
 export const KINDS = {
   earnings_soon: { pref: "earnings_soon", critical: false },
   earnings_confirmed: { pref: "earnings_confirmed", critical: false },
+  // Shipping first, and on its own preference: someone may want to be told
+  // they were liquidated without wanting to be warned as they approach it.
+  position_liquidated: { pref: "position_liquidated", critical: true },
   liquidation_warning: { pref: "liquidation_warning", critical: true },
   position_closed: { pref: "position_closed", critical: true },
   funds_received: { pref: "funds_received", critical: false },
@@ -47,6 +50,7 @@ export type NotifyOutcome =
 
 interface Prefs {
   earnings_soon: boolean;
+  position_liquidated: boolean;
   earnings_confirmed: boolean;
   liquidation_warning: boolean;
   position_closed: boolean;

@@ -144,6 +144,7 @@ notificationsRouter.post(
 const prefsSchema = z.object({
   earningsSoon: z.boolean().optional(),
   earningsConfirmed: z.boolean().optional(),
+  positionLiquidated: z.boolean().optional(),
   liquidationWarning: z.boolean().optional(),
   positionClosed: z.boolean().optional(),
   fundsReceived: z.boolean().optional(),
@@ -157,6 +158,7 @@ const prefsSchema = z.object({
 const DEFAULTS = {
   earningsSoon: true,
   earningsConfirmed: true,
+  positionLiquidated: true,
   liquidationWarning: true,
   positionClosed: true,
   fundsReceived: true,
@@ -189,6 +191,7 @@ notificationsRouter.get(
         ? {
             earningsSoon: r.earnings_soon,
             earningsConfirmed: r.earnings_confirmed,
+            positionLiquidated: r.position_liquidated,
             liquidationWarning: r.liquidation_warning,
             positionClosed: r.position_closed,
             fundsReceived: r.funds_received,
@@ -199,7 +202,7 @@ notificationsRouter.get(
           }
         : DEFAULTS,
       // Quiet hours never apply to these, whatever the user sets.
-      alwaysDelivered: ["liquidation_warning", "position_closed"],
+      alwaysDelivered: ["position_liquidated", "liquidation_warning", "position_closed"],
     });
   }),
 );
@@ -220,6 +223,7 @@ notificationsRouter.put(
     const map: Array<[keyof typeof p, string]> = [
       ["earningsSoon", "earnings_soon"],
       ["earningsConfirmed", "earnings_confirmed"],
+      ["positionLiquidated", "position_liquidated"],
       ["liquidationWarning", "liquidation_warning"],
       ["positionClosed", "position_closed"],
       ["fundsReceived", "funds_received"],

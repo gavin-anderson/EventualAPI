@@ -17,6 +17,7 @@ import { syncEarningsOdds } from "./syncEarningsOdds.js";
 import { refreshImminentEarnings } from "./refreshImminentEarnings.js";
 import { refreshPositions } from "./refreshPositions.js";
 import { evaluateRiskJob } from "./evaluateRisk.js";
+import { detectLiquidationsJob } from "./detectLiquidations.js";
 import { backfillEarningsReactions } from "./backfillEarningsReactions.js";
 
 /** Registry of runnable jobs. The imminent tiers bake in their window defaults. */
@@ -39,6 +40,9 @@ const jobs: Record<string, () => Promise<void>> = {
   "refresh-positions": refreshPositions,
   //   SHADOW MODE: computes proximity and logs it. Sends nothing.
   "evaluate-risk": evaluateRiskJob,
+  //   The one liquidation notification we send: past tense, never a false
+  //   positive. Proximity warnings are deliberately not shipped yet.
+  "detect-liquidations": detectLiquidationsJob,
   // One-time/on-demand: backfill historical reactions for report dates that predate
   // can't cover (pre-perp dates). Extra args are an optional ticker filter.
   "backfill-earnings-reactions": () => backfillEarningsReactions(process.argv.slice(3)),

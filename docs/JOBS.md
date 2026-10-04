@@ -23,6 +23,7 @@ Jobs (registry in `src/jobs/run.ts`):
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
 | `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
+| `detect-liquidations` | `liquidation_events` + a push | every minute |
 
 ## Liquidation tracking
 
@@ -38,18 +39,34 @@ So `refresh-positions` is slow and budget-capped, while `evaluate-risk` runs
 often and costs the same at any scale. The fast-moving input is the cheap one,
 which is what makes near-real-time detection affordable on top of slow refresh.
 
+`detect-liquidations` is the one liquidation notification we actually send, and
+it is **past tense**: "you were liquidated" is never a false positive. A
+proximity warning has almost no useful lead time at high leverage — a 20x
+position 90% of the way to liquidation has roughly 0.5% of price left, which
+arrives as a death notice rather than a warning.
+
+Detection requires `liquidation.liquidatedUser` to equal the wallet itself. The
+field alone is not enough: on your account it usually means you were the
+counterparty who absorbed someone else's position, so the naive check notifies
+the wrong person. Idempotency comes from the `liquidation_events` primary key —
+a duplicate "you were liquidated" would be alarming.
+
 `evaluate-risk` is in **shadow mode**: it computes proximity, logs it, and sends
 nothing. What to alert on is a separate product decision, and this pipeline does
 not depend on the answer — running it silently produces the data that decision
 needs. Watch `liqPriceStalenessP95` in its output: if liquidation prices barely
 move between refreshes, `refresh-positions` can slow down.
 
+Now that only the past-tense notification ships, shadow mode is no longer
+blocking a decision — it is there to show whether proximity warnings would be
+worth adding later.
+
 Note `consumed` is only comparable across **isolated** positions, where runway
 is roughly 1/leverage. Under cross margin the liquidation price depends on total
 account health, so the log splits isolated from cross.
 
 ```bash
-systemctl enable --now hl-api-refresh-positions.timer hl-api-evaluate-risk.timer
+systemctl enable --now hl-api-refresh-positions.timer   hl-api-evaluate-risk.timer hl-api-detect-liquidations.timer
 ```
 
 The `assets` table is maintained **manually** (ticker → name → logo; logos
