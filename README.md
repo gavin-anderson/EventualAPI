@@ -2,9 +2,9 @@
 
 API service for the Hyperliquid earnings app. Serves:
 
-- **Anonymous reads** — earnings calendar, asset catalogue, price WebSocket.
-- **Authenticated, user-scoped** — sign-up, profiles, trades and takes, via the
-  Privy → Supabase auth bridge.
+- **Anonymous reads** — the earnings calendar.
+- **Authenticated, user-scoped** — sign-up, profiles, trades and takes,
+  watchlist, feed and push, behind Privy access-token verification.
 
 Two data sources, no others: **Supabase** for everything we author, and
 **Hyperliquid's public `/info`** for everything priced or on-chain (direct, no
@@ -14,7 +14,7 @@ reports them here for verification.
 ## Stack
 
 TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` ·
-`ws` · `pino` · `prom-client` · `zod`.
+`jsonwebtoken` · `pino` · `prom-client` · `zod`.
 
 ## Endpoints
 

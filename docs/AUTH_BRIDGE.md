@@ -35,9 +35,12 @@ is simply "only the server has credentials."
 ## Identity model
 
 - The stable user id is the **Privy DID** (e.g. `did:privy:abc123`).
-- It is the `profiles` primary key AND the minted JWT `sub`.
-- Because `sub` is **text, not a uuid**, RLS uses `auth.jwt() ->> 'sub'`,
-  **never** `auth.uid()` (which expects a uuid and would be null/error here).
+- It is the `profiles` primary key, and the `user_id` on every user-scoped
+  table.
+- It is **text, not a uuid**. So any RLS policy written later must use
+  `auth.jwt() ->> 'sub'`, **never** `auth.uid()`, which expects a uuid and
+  would be null here. (No policy relies on this today — the server uses the
+  service role — but the column type is the lasting constraint.)
 - Profiles are created **lazily** on the first authenticated call
   (`POST /v1/auth/signup`, or `GET /v1/profile`), with the service role. No Privy
   webhook needed.

@@ -61,9 +61,9 @@ function nonEmpty(v: string | undefined): v is string {
 }
 
 /**
- * The auth bridge needs Supabase (to mint sessions) AND Privy (to verify the
- * incoming identity token). Until BOTH are fully configured, auth routes report
- * not-configured instead of half-working.
+ * Authenticated routes need Supabase (to read and write the data) AND Privy (to
+ * verify the incoming identity token). Until BOTH are fully configured, those
+ * routes report not-configured instead of half-working.
  */
 /** Service role only — nothing mints session JWTs, so no JWT secret. */
 const supabaseConfigured =
