@@ -46,8 +46,11 @@ TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` �
 
 **Scope:** called by our own mobile app and our own scheduled jobs. Not a public
 API. Every endpoint has one of those two callers; anything without one was
-removed — including the price stream, the asset catalogue and the portfolio
-passthroughs, all of which the app does against Hyperliquid directly.
+removed — including the price stream, the standalone asset endpoints and the
+portfolio passthroughs. Prices, `szDecimals` and `maxLeverage` the app reads from
+Hyperliquid directly; the editorial half of the catalogue (name, description,
+art) now rides along on the earnings responses instead of having endpoints of its
+own — see [docs/ASSET_CATALOGUE.md](docs/ASSET_CATALOGUE.md).
 
 Auth routes return `503 auth_not_configured` until the bridge is enabled.
 

@@ -71,11 +71,12 @@ a purge step on every art change.
 
 ### Cards are WebP
 
-Source cards are ~1.1 MB PNGs of a 3D logo over a gradient fading to black —
-content WebP compresses extremely well. Converting at quality 82 gives a mean
-absolute pixel difference of about 1/255, and takes the whole set from ~54 MB to
-under 2 MB. SVG icons are uploaded untouched; they are a few hundred bytes and
-already resolution-independent.
+Source cards average ~1.0 MB as PNGs (874 KB–1.6 MB) and are a 3D logo over a
+gradient fading to black — content WebP compresses extremely well. Converting at
+quality 82 gives a mean absolute pixel difference of about 1/255, and takes the
+whole set from ~54 MB to under 2 MB. SVG icons are uploaded untouched; at 219 B
+to 10 KB they are already smaller than anything we'd re-encode them to, and
+resolution-independent besides.
 
 ### Missing art is normal
 

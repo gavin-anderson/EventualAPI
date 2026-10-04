@@ -8,10 +8,12 @@
  *   npm run art -- --dry-run                 # report what would happen
  *   npm run art                              # convert, upload, write refs
  *   npm run art -- NVDA TSLA                 # just these tickers
+ *   npm run art -- --force                   # re-upload when only headers changed
+ *   npm run art -- --catalogue=<path>        # non-default checkout location
  *
- * Cards are converted to WebP on the way through (they are ~1.1 MB PNGs and
- * there is no reason to serve that). SVG icons are uploaded untouched — they are
- * a few hundred bytes and already resolution-independent.
+ * Cards are converted to WebP on the way through (they average ~1.0 MB as PNGs
+ * and there is no reason to serve that). SVG icons are uploaded untouched — a
+ * few KB at most, and already resolution-independent.
  *
  * Idempotent: the destination path contains a hash of the content, so a second
  * run computes the same path, sees the row already points there, and skips.
