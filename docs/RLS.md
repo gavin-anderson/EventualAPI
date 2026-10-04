@@ -54,6 +54,8 @@ uuid and ours is text, so it would be null. Kept correct even though unused.
 | `positions` | rows **with a take**, non-hidden, public columns | — | service role |
 | `watchlist` | — | own rows | service role |
 | `feed_items` (view) | — | — | read-only, service role |
+| `tracked_wallets` | — | — | internal, service role only |
+| `wallet_open_positions` | — | — | internal, service role only |
 | `assets`, `earnings_*` | all | — | service role |
 | `account_value_snapshots` | — | own rows | service role |
 
@@ -85,6 +87,10 @@ since a view hands over exactly the columns it selects.
 `username_claims` is public-read because resolving `/r/<username>` is a public
 operation. It is append-only: rows retire via `released_at` and are never
 deleted, so a released username can never be reassigned.
+
+`tracked_wallets` and `wallet_open_positions` are never served to a client at
+all — no grants, no policies beyond RLS being on. They mirror live Hyperliquid
+state for liquidation tracking, including positions the user never published.
 
 ## Keys
 

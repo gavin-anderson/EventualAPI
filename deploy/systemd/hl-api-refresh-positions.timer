@@ -1,0 +1,14 @@
+[Unit]
+Description=hl-api: refresh mirrored Hyperliquid positions
+
+[Timer]
+# The slow half of liquidation tracking: one HL call per due wallet. Positions
+# and their liquidation prices barely change, so a loose tick is enough — the
+# job itself only touches wallets whose next_refresh_at has passed, and a quiet
+# tick is one indexed query returning zero rows.
+OnCalendar=*-*-* *:*:00/30
+Persistent=false
+Unit=hl-api-job@refresh-positions.service
+
+[Install]
+WantedBy=timers.target

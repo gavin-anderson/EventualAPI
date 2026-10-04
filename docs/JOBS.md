@@ -21,6 +21,36 @@ Jobs (registry in `src/jobs/run.ts`):
 | `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed | hourly |
 | `refresh-imminent` | `earnings_events` in [~now, 1h], unconfirmed | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
+| `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
+| `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
+
+## Liquidation tracking
+
+Two jobs, split because liquidation proximity depends on two numbers that change
+at very different rates:
+
+| | changes when | cost |
+|---|---|---|
+| `liquidationPx` | the **position** changes | one HL call **per wallet** |
+| mark price | the **market** moves | one HL call **for every market** |
+
+So `refresh-positions` is slow and budget-capped, while `evaluate-risk` runs
+often and costs the same at any scale. The fast-moving input is the cheap one,
+which is what makes near-real-time detection affordable on top of slow refresh.
+
+`evaluate-risk` is in **shadow mode**: it computes proximity, logs it, and sends
+nothing. What to alert on is a separate product decision, and this pipeline does
+not depend on the answer — running it silently produces the data that decision
+needs. Watch `liqPriceStalenessP95` in its output: if liquidation prices barely
+move between refreshes, `refresh-positions` can slow down.
+
+Note `consumed` is only comparable across **isolated** positions, where runway
+is roughly 1/leverage. Under cross margin the liquidation price depends on total
+account health, so the log splits isolated from cross.
+
+```bash
+systemctl enable --now hl-api-refresh-positions.timer hl-api-evaluate-risk.timer
+```
 
 The `assets` table is maintained **manually** (ticker → name → logo; logos
 uploaded once to the `asset-logos` bucket). The earnings jobs join on it, so it

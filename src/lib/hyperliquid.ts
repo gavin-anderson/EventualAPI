@@ -100,8 +100,21 @@ export interface HlFill {
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
-export function fetchClearinghouseState(wallet: string): Promise<ClearinghouseState> {
-  return hlPost<ClearinghouseState>("clearinghouseState", { user: wallet });
+/**
+ * A user's perp account state.
+ *
+ * `dex` MUST be passed for HIP-3 builder dexes. Omitting it returns the DEFAULT
+ * perp dex instead — so an app position on `xyz` simply isn't in the response,
+ * and the caller silently sees an account with no positions.
+ */
+export function fetchClearinghouseState(
+  wallet: string,
+  dex?: string,
+): Promise<ClearinghouseState> {
+  return hlPost<ClearinghouseState>("clearinghouseState", {
+    user: wallet,
+    ...(dex ? { dex } : {}),
+  });
 }
 
 export function fetchUserFills(
@@ -118,6 +131,58 @@ export function fetchUserFills(
 
 
 // ── Market data ───────────────────────────────────────────────────────────────
+
+// ── Market data ───────────────────────────────────────────────────────────────
+
+interface RawAssetCtx {
+  markPx: string | null;
+  midPx: string | null;
+  prevDayPx: string | null;
+}
+
+interface RawUniverseAsset {
+  name: string;
+  szDecimals: number;
+  maxLeverage?: number;
+}
+
+export interface MarketQuote {
+  coin: string;
+  /** Mark price — what HL liquidates against. Never use mid; the two differ. */
+  markPx: number;
+  prevDayPx: number | null;
+}
+
+function num(v: string | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Every market on a dex in ONE call, keyed on the bare coin.
+ *
+ * This is what makes liquidation evaluation cheap: liquidation prices barely
+ * move, but marks move constantly — and the fast-changing half costs a single
+ * request no matter how many users or positions exist.
+ */
+export async function fetchMarketQuotes(dex: string): Promise<Map<string, MarketQuote>> {
+  const [meta, ctxs] = await hlPost<[{ universe: RawUniverseAsset[] }, RawAssetCtx[]]>(
+    "metaAndAssetCtxs",
+    dex ? { dex } : undefined,
+  );
+  const out = new Map<string, MarketQuote>();
+
+  meta.universe.forEach((asset, i) => {
+    const ctx = ctxs[i];
+    if (!ctx) return;
+    const markPx = num(ctx.markPx) ?? num(ctx.midPx);
+    if (markPx === null || markPx <= 0) return;
+    const coin = bareCoin(asset.name);
+    out.set(coin, { coin, markPx, prevDayPx: num(ctx.prevDayPx) });
+  });
+  return out;
+}
 
 /** One candle from `candleSnapshot`: `t` open ms, `c` close price. */
 export interface Candle {

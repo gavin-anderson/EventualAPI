@@ -15,6 +15,8 @@ import { syncEarningsCalendar } from "./syncEarningsCalendar.js";
 import { syncEarningsHistory } from "./syncEarningsHistory.js";
 import { syncEarningsOdds } from "./syncEarningsOdds.js";
 import { refreshImminentEarnings } from "./refreshImminentEarnings.js";
+import { refreshPositions } from "./refreshPositions.js";
+import { evaluateRiskJob } from "./evaluateRisk.js";
 import { backfillEarningsReactions } from "./backfillEarningsReactions.js";
 
 /** Registry of runnable jobs. The imminent tiers bake in their window defaults. */
@@ -30,6 +32,13 @@ const jobs: Record<string, () => Promise<void>> = {
   "refresh-approaching": () => refreshImminentEarnings({ fromHours: 1, toHours: 24 }),
   //   Imminent: events in [~now, 1h] — every 5 min (escalated cadence).
   "refresh-imminent": () => refreshImminentEarnings({ fromHours: -0.25, toHours: 1 }),
+
+  // Liquidation tracking. Split because liquidation prices barely move while
+  // marks move constantly: the per-wallet half is slow and budgeted, the
+  // all-markets half is one call and runs often.
+  "refresh-positions": refreshPositions,
+  //   SHADOW MODE: computes proximity and logs it. Sends nothing.
+  "evaluate-risk": evaluateRiskJob,
   // One-time/on-demand: backfill historical reactions for report dates that predate
   // can't cover (pre-perp dates). Extra args are an optional ticker filter.
   "backfill-earnings-reactions": () => backfillEarningsReactions(process.argv.slice(3)),

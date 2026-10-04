@@ -1,0 +1,16 @@
+[Unit]
+Description=hl-api: evaluate liquidation proximity (SHADOW MODE)
+
+[Timer]
+# The fast half: one Hyperliquid call covers every market, so this costs the
+# same whether there are 10 positions or 10,000. Runs often because the mark
+# price is the input that actually moves.
+#
+# SHADOW MODE — logs proximity and sends nothing. Safe to run continuously; it
+# exists to gather the data the alerting decision needs.
+OnCalendar=*-*-* *:*:00/30
+Persistent=false
+Unit=hl-api-job@evaluate-risk.service
+
+[Install]
+WantedBy=timers.target

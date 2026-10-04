@@ -65,7 +65,7 @@ function windowEnd(from: Date): string {
  */
 async function openContext(wallet: string, coin: string) {
   try {
-    const state = await fetchClearinghouseState(wallet);
+    const state = await fetchClearinghouseState(wallet, config.hyperliquid.dex);
     const held = state.assetPositions.find(
       (ap) => ap.position.coin === coin || ap.position.coin.endsWith(`:${coin}`),
     );

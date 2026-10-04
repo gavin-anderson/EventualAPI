@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase.js";
 import type { VerifiedPrivyIdentity } from "./authBridge.js";
 import { fetchEmbeddedWallet } from "./privy.js";
+import { trackWallet } from "./liquidation.js";
 import { normalizeUsername, usernameProblem } from "./usernames.js";
 import { logger } from "./logger.js";
 import { config } from "../config/env.js";
@@ -52,6 +53,7 @@ export async function bootstrapProfile(
   const existing = await selectProfile(db, did);
   if (existing) {
     const patched = await backfill(db, existing, wallet);
+    if (patched.wallet_address) await trackWallet(did, patched.wallet_address);
     return { profile: patched, created: false, walletStatus: statusOf(patched.wallet_address) };
   }
 
@@ -62,10 +64,14 @@ export async function bootstrapProfile(
     .single();
 
   if (!error && data) {
+    const profile = data as Profile;
+    // Enrol for liquidation tracking here — at first authenticated call rather
+    // than first trade, so a position opened before we saw the user is found.
+    if (profile.wallet_address) await trackWallet(did, profile.wallet_address);
     return {
-      profile: data as Profile,
+      profile,
       created: true,
-      walletStatus: statusOf((data as Profile).wallet_address),
+      walletStatus: statusOf(profile.wallet_address),
     };
   }
 
