@@ -513,6 +513,181 @@
           }
         }
       ]
+    },
+    {
+      "name": "Notifications (auth)",
+      "description": "Device registration, the inbox, and push preferences.\n\nDORMANT until APNS_KEY / APNS_KEY_ID / APNS_TEAM_ID are set — but not broken: notifications are still written to the server-side inbox, so nothing is lost. `pushConfigured` on the register response says which state you are in.\n\nThe app also cannot register yet: it has no AppDelegate, so the APNs device token is never captured. It requests permission and discards the token.",
+      "item": [
+        {
+          "name": "Register this device",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/devices/{{deviceToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{deviceToken}}"
+              ]
+            },
+            "description": "AUTHENTICATED. Idempotent — call on every launch; it refreshes last_seen_at and clears a previous invalidation after a reinstall.\n\n`environment` is REQUIRED and cannot be inferred server-side: a token from a debug build only works against APNs sandbox, and a production server legitimately serves TestFlight builds too. Getting it wrong returns BadDeviceToken and invalidates the token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"environment\": \"sandbox\",\n  \"appVersion\": \"1.0.0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unregister this device",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/devices/{{deviceToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{deviceToken}}"
+              ]
+            },
+            "description": "AUTHENTICATED. For sign-out. Deletes rather than invalidates — this is the user's own choice, not APNs telling us the token is dead, and the distinction is worth keeping."
+          }
+        },
+        {
+          "name": "Inbox",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "notifications"
+              ]
+            },
+            "description": "AUTHENTICATED. Newest first, with an `unread` count for the badge. `?limit= &offset=`\n\nServer-side rather than the app's UserDefaults, so it survives a reinstall, matches across devices, and still shows a message whose push failed."
+          }
+        },
+        {
+          "name": "Mark all read",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/notifications/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "notifications",
+                "read"
+              ]
+            },
+            "description": "AUTHENTICATED. Matches the app's InboxStore.markAllRead() — opening the inbox counts as viewing it, so there is no per-item call."
+          }
+        },
+        {
+          "name": "Preferences (read)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/notifications/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "notifications",
+                "preferences"
+              ]
+            },
+            "description": "AUTHENTICATED. Returns defaults when no row exists, so the client never special-cases a user who has not opened settings.\n\n`alwaysDelivered` lists the categories quiet hours never apply to."
+          }
+        },
+        {
+          "name": "Preferences (update)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/notifications/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "notifications",
+                "preferences"
+              ]
+            },
+            "description": "AUTHENTICATED. Partial update — send only what changed.\n\nQuiet hours need a `timezone` to mean anything, and a window may wrap midnight (22 -> 7). They apply to informational categories only: a liquidation warning is never held back, which is enforced in code rather than left to this setting.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"earningsSoon\": true,\n  \"quietHoursStart\": 22,\n  \"quietHoursEnd\": 7,\n  \"timezone\": \"America/New_York\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   ],
   "variable": [
@@ -561,6 +736,12 @@
       "value": "did:privy:",
       "type": "string",
       "description": "A Privy DID, for the batch profile lookup."
+    },
+    {
+      "key": "deviceToken",
+      "value": "",
+      "type": "string",
+      "description": "APNs device token from the app. Hex, 64 chars on current iOS."
     }
   ]
 }

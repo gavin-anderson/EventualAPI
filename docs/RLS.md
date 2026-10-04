@@ -56,6 +56,9 @@ uuid and ours is text, so it would be null. Kept correct even though unused.
 | `feed_items` (view) | — | — | read-only, service role |
 | `tracked_wallets` | — | — | internal, service role only |
 | `wallet_open_positions` | — | — | internal, service role only |
+| `device_tokens` | — | — | internal, service role only |
+| `notification_preferences` | — | — | internal, service role only |
+| `notifications` | — | — | internal, service role only |
 | `assets`, `earnings_*` | all | — | service role |
 | `account_value_snapshots` | — | own rows | service role |
 

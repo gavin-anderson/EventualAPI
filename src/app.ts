@@ -7,6 +7,7 @@ import { earningsRouter } from "./routes/earnings.js";
 import { profileRouter } from "./routes/profile.js";
 import { tradesRouter } from "./routes/trades.js";
 import { feedRouter } from "./routes/feed.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { watchlistRouter } from "./routes/watchlist.js";
 
 /** Build the Express app. Pure wiring — no listening — so tests can import it. */
@@ -30,6 +31,7 @@ export function createApp(): Express {
   app.use("/v1", profileRouter);           // signup + profile + usernames
   app.use("/v1", tradesRouter);            // trade notifications + takes
   app.use("/v1", feedRouter);              // reading the position feed
+  app.use("/v1", notificationsRouter);     // devices, inbox, push preferences
   app.use("/v1", watchlistRouter);         // starred tickers
 
   app.use(notFoundHandler);

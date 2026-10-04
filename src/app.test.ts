@@ -84,6 +84,12 @@ describe("protected routes reject unauthenticated callers", () => {
     ["DELETE", "/v1/watchlist/NVDA"],
     ["GET", "/v1/feed"],
     ["GET", "/v1/feed/sentiment?coin=NVDA"],
+    ["GET", "/v1/notifications"],
+    ["POST", "/v1/notifications/read"],
+    ["GET", "/v1/notifications/preferences"],
+    ["PUT", "/v1/notifications/preferences", { earningsSoon: false }],
+    ["PUT", "/v1/devices/abcdef0123456789abcdef0123456789", { environment: "sandbox" }],
+    ["DELETE", "/v1/devices/abcdef0123456789abcdef0123456789"],
   ];
 
   for (const [method, path, body] of protectedRoutes) {

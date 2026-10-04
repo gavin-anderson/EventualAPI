@@ -37,6 +37,12 @@ TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` �
 | GET    | `/v1/watchlist`                 | Privy bearer  | Starred tickers.                                     |
 | PUT    | `/v1/watchlist/:ticker`         | Privy bearer  | Star. Idempotent.                                    |
 | DELETE | `/v1/watchlist/:ticker`         | Privy bearer  | Un-star. Idempotent.                                 |
+| PUT    | `/v1/devices/:token`            | Privy bearer  | Register for push. Idempotent; `environment` required.|
+| DELETE | `/v1/devices/:token`            | Privy bearer  | Unregister, e.g. on sign-out.                        |
+| GET    | `/v1/notifications`             | Privy bearer  | The inbox, newest first, with an unread count.       |
+| POST   | `/v1/notifications/read`        | Privy bearer  | Mark everything read.                                |
+| GET    | `/v1/notifications/preferences` | Privy bearer  | Per-category prefs + quiet hours.                    |
+| PUT    | `/v1/notifications/preferences` | Privy bearer  | Partial update.                                      |
 
 **Scope:** called by our own mobile app and our own scheduled jobs. Not a public
 API. Every endpoint has one of those two callers; anything without one was

@@ -34,6 +34,14 @@ const schema = z.object({
   // Short on purpose: a take is meant to be contemporaneous with its trade.
   TAKE_WINDOW_SECONDS: z.coerce.number().int().min(30).max(86_400).default(600),
   TAKE_MAX_LENGTH: z.coerce.number().int().min(50).max(2_000).default(500),
+
+  // APNs. Dormant until all three secrets are set; the service runs fine
+  // without them. APNS_KEY is the .p8 contents (PKCS#8 PEM) rather than a path,
+  // so it can come from a secret manager; escaped newlines are handled.
+  APNS_KEY: z.string().optional().or(z.literal("")),
+  APNS_KEY_ID: z.string().optional().or(z.literal("")),
+  APNS_TEAM_ID: z.string().optional().or(z.literal("")),
+  APNS_BUNDLE_ID: z.string().default("buzz.Earnings"),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -127,6 +135,15 @@ export const config = {
   takes: {
     windowSeconds: e.TAKE_WINDOW_SECONDS,
     maxLength: e.TAKE_MAX_LENGTH,
+  },
+
+  apns: {
+    configured:
+      nonEmpty(e.APNS_KEY) && nonEmpty(e.APNS_KEY_ID) && nonEmpty(e.APNS_TEAM_ID),
+    key: e.APNS_KEY || "",
+    keyId: e.APNS_KEY_ID || "",
+    teamId: e.APNS_TEAM_ID || "",
+    bundleId: e.APNS_BUNDLE_ID,
   },
 } as const;
 
