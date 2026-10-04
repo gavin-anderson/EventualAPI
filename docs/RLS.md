@@ -62,11 +62,19 @@ uuid and ours is text, so it would be null. Kept correct even though unused.
 | `liquidation_events` | — | — | internal, service role only |
 | `assets`, `earnings_*` | all | — | service role |
 | `asset-logos` (Storage) | **public bucket** | — | service role |
+| `avatars` (Storage) | **public bucket** | — | service role |
 | `account_value_snapshots` | — | own rows | service role |
 
 `asset-logos` is deliberately a public bucket: it holds company logos and card
 art, which are not user data and are served straight to unauthenticated app
 screens. Nothing user-specific may go in it — avatars have their own bucket.
+
+`avatars` is also public, but it holds **user photos**, and that changes two
+things. Uploads are re-encoded server-side to WebP, which drops EXIF — phone
+photos routinely carry GPS coordinates and this bucket is world-readable. And
+its objects are cached for an hour rather than a year: the CDN keeps serving an
+object after it is deleted from storage, so a long TTL would mean deleting a
+photo didn't make it unreachable. Neither applies to company art.
 
 Three of those encode a product rule rather than a convention:
 

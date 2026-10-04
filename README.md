@@ -29,6 +29,8 @@ TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` �
 | GET    | `/v1/profile`                   | Privy bearer  | The caller's own profile.                            |
 | GET    | `/v1/profile/username/check`    | Privy bearer  | Availability hint. `?name=`                          |
 | POST   | `/v1/profile/username`          | Privy bearer  | Atomic claim.                                        |
+| PUT    | `/v1/profile/avatar`            | Privy bearer  | Upload a photo. Raw image bytes; re-encoded to 512px WebP. |
+| DELETE | `/v1/profile/avatar`            | Privy bearer  | Drop the photo; the app's drawn default returns.     |
 | POST   | `/v1/trades/open`               | Privy bearer  | Record a verified opening trade; opens a take window.|
 | POST   | `/v1/trades/close`              | Privy bearer  | Record the close; opens a second take window.        |
 | POST   | `/v1/takes`                     | Privy bearer  | Post a take about a trade. Optional.                 |

@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { badRequest } from "../lib/httpError.js";
 import { readFeed, publishedSentiment, type FeedItemRow } from "../lib/feed.js";
 import { normalizeTicker } from "../lib/watchlist.js";
+import { avatarUrl } from "../lib/avatar.js";
 
 export const feedRouter = Router();
 
@@ -20,7 +21,9 @@ function view(r: FeedItemRow) {
   return {
     id: r.id,
     kind: r.kind,
-    author: { id: r.user_id, username: r.username, imageRef: r.image_ref },
+    // A URL, not a storage path. Null means the author has no photo and the app
+    // draws its own default from the username.
+    author: { id: r.user_id, username: r.username, imageUrl: avatarUrl(r.image_ref) },
     coin: r.coin,
     side: r.side,
     size: r.size,
