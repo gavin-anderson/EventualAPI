@@ -1,12 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/errorHandler.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireWallet } from "../middleware/auth.js";
 import { mintSupabaseSession } from "../lib/authBridge.js";
-import { upsertProfile } from "../lib/profiles.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { fetchClearinghouseState, fetchUserFills } from "../lib/hyperliquid.js";
-import { badRequest, notFound } from "../lib/httpError.js";
+import { badRequest } from "../lib/httpError.js";
 import { TtlCache } from "../lib/cache.js";
 
 export const accountRouter = Router();
@@ -38,26 +37,6 @@ accountRouter.post(
   }),
 );
 
-// ── GET /v1/profile ────────────────────────────────────────────────────────────────
-
-/**
- * GET /v1/profile — AUTHENTICATED.
- *
- * Returns the verified identity + lazily upserts the profile.
- */
-accountRouter.get(
-  "/profile",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const identity = req.identity!;
-    const profile = await upsertProfile(identity);
-    res.json({
-      user: { id: identity.privyDid, wallet: identity.wallet ?? null },
-      profile,
-    });
-  }),
-);
-
 // ── GET /v1/portfolio ──────────────────────────────────────────────────────
 
 /**
@@ -74,15 +53,11 @@ accountRouter.get(
 accountRouter.get(
   "/portfolio",
   requireAuth,
+  requireWallet,
   asyncHandler(async (req, res) => {
     const identity = req.identity!;
     const db = supabaseAdmin();
-
-    // Resolve wallet from profile (wallet may not yet be in req.identity — TODO)
-    const wallet = await resolveWallet(identity.privyDid, identity.wallet ?? null);
-    if (!wallet) {
-      throw notFound("wallet_not_connected");
-    }
+    const wallet = identity.wallet!;
 
     const cacheKey = `portfolio:${wallet}`;
     const result = await portfolioCache.getOrSet(cacheKey, PORTFOLIO_CACHE_TTL, async () => {
@@ -149,15 +124,14 @@ const closedSchema = z.object({
 accountRouter.get(
   "/positions/closed",
   requireAuth,
+  requireWallet,
   asyncHandler(async (req, res) => {
     const parsed = closedSchema.safeParse(req.query);
     if (!parsed.success) {
       throw badRequest(parsed.error.issues.map((i) => i.message).join("; "));
     }
 
-    const identity = req.identity!;
-    const wallet = await resolveWallet(identity.privyDid, identity.wallet ?? null);
-    if (!wallet) throw notFound("wallet_not_connected");
+    const wallet = req.identity!.wallet!;
 
     const { days } = parsed.data;
     const startTime = Date.now() - days * 86_400_000;
@@ -202,20 +176,6 @@ accountRouter.get(
 );
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function resolveWallet(
-  privyDid: string,
-  fromToken: string | null,
-): Promise<string | null> {
-  if (fromToken) return fromToken;
-  const db = supabaseAdmin();
-  const { data } = await db
-    .from("profiles")
-    .select("wallet_address")
-    .eq("id", privyDid)
-    .single();
-  return (data as { wallet_address: string | null } | null)?.wallet_address ?? null;
-}
 
 interface AssetMeta {
   ticker: string;

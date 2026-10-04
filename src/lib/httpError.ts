@@ -20,5 +20,7 @@ export class HttpError extends Error {
 export const badRequest = (msg?: string) => new HttpError(400, "bad_request", msg);
 export const unauthorized = (msg?: string) => new HttpError(401, "unauthorized", msg);
 export const notFound = (msg?: string) => new HttpError(404, "not_found", msg);
+/** 409 — the request is valid but conflicts with current state (e.g. a taken username). */
+export const conflict = (code: string, msg?: string) => new HttpError(409, code, msg);
 export const serviceUnavailable = (code: string, msg?: string) =>
   new HttpError(503, code, msg);

@@ -78,7 +78,24 @@ export interface HlFill {
   crossed: boolean;
   fee: string;
   feeToken: string;
-  builderFee: string;
+  /**
+   * What the fill did: "Open Long" | "Close Long" | "Open Short" |
+   * "Close Short" | "Long > Short" | "Short > Long" | "Settlement".
+   * Present on every fill observed; the "X > Y" forms are position flips.
+   */
+  dir: string;
+  /**
+   * Client order id, echoed back when the order carried one. ~80% of sampled
+   * live fills have it. This is how we tie a fill to a trade the app told us
+   * about, without replaying net size.
+   */
+  cloid?: string;
+  /**
+   * Builder fee, present only when a builder code was attached. Absent across
+   * all 10k fills sampled 2026-10-03 — nothing populates it until we start
+   * charging one (see tmp/systems-design/referrals.md).
+   */
+  builderFee?: string;
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────

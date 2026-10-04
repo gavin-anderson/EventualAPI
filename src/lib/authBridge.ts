@@ -3,14 +3,10 @@ import { config } from "../config/env.js";
 import { unauthorized } from "./httpError.js";
 
 /**
- * The auth bridge: Privy is the identity provider, but Supabase RLS expects a
- * Supabase-compatible JWT. So we (1) verify the Privy access token, then
- * (2) mint a short-lived Supabase session JWT the app uses for direct,
- * RLS-scoped Supabase access.
+ * Privy is the identity provider; Supabase RLS wants a Supabase-signed JWT. This
+ * verifies the former and mints the latter. See docs/AUTH_BRIDGE.md.
  *
- * Phase 0 note: this code path is dormant until both Privy and Supabase are
- * configured (see config.auth.configured). The route layer enforces that and
- * returns 503 auth_not_configured otherwise — this module assumes config exists.
+ * Assumes config is present — `requireAuth` returns 503 when it isn't.
  */
 
 export interface VerifiedPrivyIdentity {
@@ -21,17 +17,15 @@ export interface VerifiedPrivyIdentity {
 }
 
 /**
- * Verify a Privy access token OFFLINE using the app's public verification key.
- * Privy access tokens are ES256 JWTs issued by "privy.io" with the app id as the
- * audience. This avoids a network round-trip and needs no app secret.
+ * Verify a Privy access token offline against the app's public verification key.
  *
- * Wallet enrichment (resolving the linked Hyperliquid address) is done later via
- * the Privy server SDK's getUser(); the access token alone does not carry it.
+ * The token carries no wallet (`AuthTokenClaims` is only appId/issuer/issuedAt/
+ * expiration/sessionId/userId), so the address comes from `fetchEmbeddedWallet`.
  */
 export function verifyPrivyToken(token: string): VerifiedPrivyIdentity {
   let payload: jwt.JwtPayload;
   try {
-    payload = jwt.verify(token, config.privy.verificationKey, {
+    payload = jwt.verify(token, pemFor(config.privy.verificationKey), {
       algorithms: ["ES256"],
       issuer: "privy.io",
       audience: config.privy.appId,
@@ -41,17 +35,25 @@ export function verifyPrivyToken(token: string): VerifiedPrivyIdentity {
   }
 
   const privyDid = payload.sub;
-  if (!privyDid) {
-    throw unauthorized("privy token missing subject");
-  }
-
+  if (!privyDid) throw unauthorized("privy token missing subject");
   return { privyDid };
 }
 
+/** Accept the key with or without PEM armour — a dashboard copy-paste loses it. */
+function pemFor(key: string): string {
+  const trimmed = key.trim();
+  // Already armoured: just un-escape "\n" sequences, which is how a multi-line
+  // key survives being put in a single-line env var.
+  if (trimmed.includes("-----BEGIN")) return trimmed.replace(/\\n/g, "\n");
+
+  // Bare base64 SPKI body: re-wrap it at 64 columns and add the armour.
+  const body = trimmed.replace(/\s+/g, "").match(/.{1,64}/g)?.join("\n") ?? trimmed;
+  return `-----BEGIN PUBLIC KEY-----\n${body}\n-----END PUBLIC KEY-----`;
+}
+
 /**
- * Mint a Supabase-compatible session JWT signed with the Supabase JWT secret.
- * RLS reads `auth.jwt() ->> 'sub'` (we use the Privy DID, a text value — NOT a
- * uuid, so policies must use the jwt sub directly, not auth.uid()).
+ * Mint a Supabase session JWT. `sub` is the Privy DID — text, not a uuid — so
+ * RLS must compare `auth.jwt() ->> 'sub'`, never `auth.uid()`.
  */
 export function mintSupabaseSession(identity: VerifiedPrivyIdentity): {
   token: string;

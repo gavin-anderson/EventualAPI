@@ -25,10 +25,17 @@ const schema = z.object({
 
   // Privy (optional until the auth bridge is wired)
   PRIVY_APP_ID: z.string().optional().or(z.literal("")),
+  // Public key for offline token verification.
   PRIVY_VERIFICATION_KEY: z.string().optional().or(z.literal("")),
+  // Needed only to call Privy's API (getUser -> embedded wallet).
+  PRIVY_APP_SECRET: z.string().optional().or(z.literal("")),
 
   // Benzinga (earnings calendar + EPS data)
   BENZINGA_API_KEY: z.string().optional().or(z.literal("")),
+
+  // Short on purpose: a take is meant to be contemporaneous with its trade.
+  TAKE_WINDOW_SECONDS: z.coerce.number().int().min(30).max(86_400).default(600),
+  TAKE_MAX_LENGTH: z.coerce.number().int().min(50).max(2_000).default(500),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -60,6 +67,34 @@ const supabaseConfigured =
 const privyConfigured =
   nonEmpty(e.PRIVY_APP_ID) && nonEmpty(e.PRIVY_VERIFICATION_KEY);
 
+/**
+ * Wallet resolution calls Privy's API, which needs the app secret — the access
+ * token carries no wallet. Tracked separately so sign-in can work while wallet
+ * resolution is unconfigured, and the API can say which.
+ */
+const privyWalletResolution =
+  nonEmpty(e.PRIVY_APP_ID) && nonEmpty(e.PRIVY_APP_SECRET);
+
+/**
+ * PRIVY_VERIFICATION_KEY is an ES256 public key, not the app id — easy to
+ * confuse, since both come from the same dashboard page. Getting it wrong 401s
+ * every request with nothing in the logs, so fail at startup instead.
+ */
+if (nonEmpty(e.PRIVY_VERIFICATION_KEY)) {
+  const key = e.PRIVY_VERIFICATION_KEY.trim();
+  const looksLikeAppId = key === e.PRIVY_APP_ID || key.length < 80;
+  if (looksLikeAppId && !key.includes("-----BEGIN")) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "Invalid PRIVY_VERIFICATION_KEY: expected an ES256 public key (base64 SPKI, " +
+        "optionally PEM-armoured) from Privy Dashboard -> Configuration -> App settings. " +
+        `Got a ${key.length}-character value, which looks like an app id. ` +
+        "Every token verification would fail with a 401.",
+    );
+    process.exit(1);
+  }
+}
+
 export const config = {
   env: e.NODE_ENV,
   isProd: e.NODE_ENV === "production",
@@ -81,8 +116,11 @@ export const config = {
 
   privy: {
     configured: privyConfigured,
+    /** True when we can call Privy's API to resolve embedded wallets. */
+    canResolveWallet: privyWalletResolution,
     appId: e.PRIVY_APP_ID || "",
     verificationKey: e.PRIVY_VERIFICATION_KEY || "",
+    appSecret: e.PRIVY_APP_SECRET || "",
   },
 
   /** The auth bridge is live only when both halves are present. */
@@ -93,6 +131,11 @@ export const config = {
   benzinga: {
     configured: nonEmpty(e.BENZINGA_API_KEY),
     apiKey: e.BENZINGA_API_KEY || "",
+  },
+
+  takes: {
+    windowSeconds: e.TAKE_WINDOW_SECONDS,
+    maxLength: e.TAKE_MAX_LENGTH,
   },
 } as const;
 

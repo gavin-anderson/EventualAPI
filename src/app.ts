@@ -5,6 +5,8 @@ import { healthRouter } from "./routes/health.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { assetsRouter } from "./routes/assets.js";
 import { earningsRouter } from "./routes/earnings.js";
+import { profileRouter } from "./routes/profile.js";
+import { tradesRouter } from "./routes/trades.js";
 import { accountRouter } from "./routes/account.js";
 
 /** Build the Express app. Pure wiring — no listening — so tests can import it. */
@@ -26,7 +28,9 @@ export function createApp(): Express {
   // Public + authenticated API, versioned under /v1.
   app.use("/v1/assets", assetsRouter);     // anonymous (asset catalogue)
   app.use("/v1/earnings", earningsRouter); // anonymous (upcoming earnings calendar)
-  app.use("/v1", accountRouter);       // authenticated (requireAuth per-route)
+  app.use("/v1", profileRouter);           // signup + profile + usernames
+  app.use("/v1", tradesRouter);            // trade notifications + takes
+  app.use("/v1", accountRouter);           // authenticated (requireAuth per-route)
 
   app.use(notFoundHandler);
   app.use(errorHandler);
