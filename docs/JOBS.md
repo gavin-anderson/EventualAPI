@@ -21,6 +21,53 @@ Jobs (registry in `src/jobs/run.ts`):
 | `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed | hourly |
 | `refresh-imminent` | `earnings_events` in [~now, 1h], unconfirmed | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
+| `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
+| `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
+| `detect-liquidations` | `liquidation_events` + a push | every minute |
+
+## Liquidation tracking
+
+Two jobs, split because liquidation proximity depends on two numbers that change
+at very different rates:
+
+| | changes when | cost |
+|---|---|---|
+| `liquidationPx` | the **position** changes | one HL call **per wallet** |
+| mark price | the **market** moves | one HL call **for every market** |
+
+So `refresh-positions` is slow and budget-capped, while `evaluate-risk` runs
+often and costs the same at any scale. The fast-moving input is the cheap one,
+which is what makes near-real-time detection affordable on top of slow refresh.
+
+`detect-liquidations` is the one liquidation notification we actually send, and
+it is **past tense**: "you were liquidated" is never a false positive. A
+proximity warning has almost no useful lead time at high leverage — a 20x
+position 90% of the way to liquidation has roughly 0.5% of price left, which
+arrives as a death notice rather than a warning.
+
+Detection requires `liquidation.liquidatedUser` to equal the wallet itself. The
+field alone is not enough: on your account it usually means you were the
+counterparty who absorbed someone else's position, so the naive check notifies
+the wrong person. Idempotency comes from the `liquidation_events` primary key —
+a duplicate "you were liquidated" would be alarming.
+
+`evaluate-risk` is in **shadow mode**: it computes proximity, logs it, and sends
+nothing. What to alert on is a separate product decision, and this pipeline does
+not depend on the answer — running it silently produces the data that decision
+needs. Watch `liqPriceStalenessP95` in its output: if liquidation prices barely
+move between refreshes, `refresh-positions` can slow down.
+
+Now that only the past-tense notification ships, shadow mode is no longer
+blocking a decision — it is there to show whether proximity warnings would be
+worth adding later.
+
+Note `consumed` is only comparable across **isolated** positions, where runway
+is roughly 1/leverage. Under cross margin the liquidation price depends on total
+account health, so the log splits isolated from cross.
+
+```bash
+systemctl enable --now hl-api-refresh-positions.timer   hl-api-evaluate-risk.timer hl-api-detect-liquidations.timer
+```
 
 The `assets` table is maintained **manually** (ticker → name → logo; logos
 uploaded once to the `asset-logos` bucket). The earnings jobs join on it, so it
@@ -103,54 +150,13 @@ journalctl -u 'hl-api-job@refresh-imminent.service' -n 100   # logs (JSON)
 
 ## Approach B (planned): DB-backed per-event schedule
 
-Approach A polls on wall-clock ticks. That's ideal for "to the hour," but it
-can't (a) poll at exact per-event offsets (T-30, T-10, T-2…), or (b) act the
-*instant* a time is confirmed (e.g. fire a push notification). When those become
-requirements — or the imminent-event count per tick strains Benzinga rate limits
-— evolve to a **schedule table** instead of fixed windows:
+Approach A polls on wall-clock ticks, which is right for "to the hour" but can't
+poll at per-event offsets or react the instant a time is confirmed. When those
+become requirements, the evolution is a `earnings_refresh_schedule` table with a
+`next_run_at`, processed by a **frequent oneshot** (`... where next_run_at <=
+now() FOR UPDATE SKIP LOCKED`) rather than a long-running daemon — same process
+model as today, with per-event precision.
 
-```
-earnings_refresh_schedule(
-  earnings_event_id  uuid primary key references earnings_events(id),
-  next_run_at        timestamptz not null,
-  cadence_seconds    int not null,        -- shrinks as the event nears
-  ...
-)
-```
-
-The daily discovery seeds/updates one row per upcoming event; a worker processes
-rows where `next_run_at <= now()`, refreshes them, and reschedules `next_run_at`.
-State lives in Postgres, so it's restart-safe and dedup is a unique key — the same
-properties Approach A gets for free, now with per-event precision.
-
-### Should the Approach-B worker be its own process, outside the API?
-
-**Yes — and preferably it shouldn't be a long-running daemon at all.** Two ways to
-build it:
-
-1. **Long-running scheduler daemon.** If it holds a poll loop / in-memory timers,
-   it **must** be its own process, never embedded in the API:
-   - **Main-thread isolation** — a continuous loop + refresh work would share the
-     API's single event loop; even I/O-bound, that couples lifecycles and adds
-     latency jitter. Separate process = the API's loop is never touched. (Same
-     reasoning as the job runner today.)
-   - **Independent lifecycle** — deploy/restart the scheduler without bouncing the
-     API, and vice versa.
-   - **Crash isolation** — a scheduler bug can't take the API down.
-   - **Must be a singleton** — one scheduler, or you double-schedule. Running it in
-     the API (which you'll want to scale to N replicas) would fan out to N
-     schedulers. A separate single-instance service sidesteps that; multi-box
-     needs a Postgres advisory lock / `FOR UPDATE SKIP LOCKED`.
-
-2. **Frequent oneshot (recommended).** Skip the daemon: a **1-minute systemd
-   timer** runs `node dist/jobs/run.js process-earnings-schedule`, which claims
-   due rows (`… where next_run_at <= now() FOR UPDATE SKIP LOCKED`), refreshes,
-   and reschedules. This keeps *exactly* the properties we like about Approach A —
-   its own short-lived process (zero main-thread impact), stateless between runs,
-   restart-safe, and naturally singleton per box — while adding per-event
-   scheduling. It's a strict evolution of the current runner, not a rewrite.
-
-**Recommendation:** if/when we adopt Approach B, do it as the **oneshot
-schedule-processor (option 2)**, not a long-running daemon. It answers the
-main-thread concern by construction: like every job today, it runs in its own
-process and exits.
+The full reasoning, and why the oneshot beats a daemon, is in
+`tmp/systems-design/liquidation-tracking.md`, which reuses the same pattern for
+position refresh.

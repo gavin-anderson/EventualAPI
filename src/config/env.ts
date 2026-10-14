@@ -5,9 +5,9 @@ import { z } from "zod";
  * Centralised, validated configuration. Parsed once at startup so a bad env
  * fails fast and loudly rather than surfacing as a confusing runtime error.
  *
- * Phase 0 reality: ClickHouse is required for the public read tier; Supabase +
- * Privy are OPTIONAL. When the Supabase/Privy block is incomplete, the auth
- * bridge stays dormant (auth routes return 503) — see `auth.configured`.
+ * Supabase backs every read tier. Privy is OPTIONAL: when the Supabase/Privy
+ * block is incomplete the auth bridge stays dormant (auth routes return 503) —
+ * see `auth.configured`.
  */
 const schema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -15,31 +15,33 @@ const schema = z.object({
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
-
-  // ClickHouse (read-only upstream)
-  CH_URL: z.string().url().default("http://127.0.0.1:8123"),
-  CH_DATABASE: z.string().min(1).default("hl"),
-  CH_USERNAME: z.string().min(1).default("default"),
-  CH_PASSWORD: z.string().default(""),
-  CH_DEX: z.string().default(""),
+  HL_DEX: z.string().default("xyz"),
 
   // Supabase (optional until the auth bridge is wired)
   SUPABASE_URL: z.string().url().optional().or(z.literal("")),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().or(z.literal("")),
-  SUPABASE_ANON_KEY: z.string().optional().or(z.literal("")),
-  SUPABASE_JWT_SECRET: z.string().optional().or(z.literal("")),
-  SESSION_JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
   // Privy (optional until the auth bridge is wired)
   PRIVY_APP_ID: z.string().optional().or(z.literal("")),
+  // Public key for offline token verification.
   PRIVY_VERIFICATION_KEY: z.string().optional().or(z.literal("")),
-
-  // Hyperliquid EU proxy (geo-block bypass; same proxy hl-ingest uses)
-  HL_PROXY_URL: z.string().url().optional().or(z.literal("")),
-  HL_PROXY_KEY: z.string().optional().or(z.literal("")),
+  // Needed only to call Privy's API (getUser -> embedded wallet).
+  PRIVY_APP_SECRET: z.string().optional().or(z.literal("")),
 
   // Benzinga (earnings calendar + EPS data)
   BENZINGA_API_KEY: z.string().optional().or(z.literal("")),
+
+  // Short on purpose: a take is meant to be contemporaneous with its trade.
+  TAKE_WINDOW_SECONDS: z.coerce.number().int().min(30).max(86_400).default(600),
+  TAKE_MAX_LENGTH: z.coerce.number().int().min(50).max(2_000).default(500),
+
+  // APNs. Dormant until all three secrets are set; the service runs fine
+  // without them. APNS_KEY is the .p8 contents (PKCS#8 PEM) rather than a path,
+  // so it can come from a secret manager; escaped newlines are handled.
+  APNS_KEY: z.string().optional().or(z.literal("")),
+  APNS_KEY_ID: z.string().optional().or(z.literal("")),
+  APNS_TEAM_ID: z.string().optional().or(z.literal("")),
+  APNS_BUNDLE_ID: z.string().default("buzz.Earnings"),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -59,17 +61,40 @@ function nonEmpty(v: string | undefined): v is string {
 }
 
 /**
- * The auth bridge needs Supabase (to mint sessions) AND Privy (to verify the
- * incoming identity token). Until BOTH are fully configured, auth routes report
- * not-configured instead of half-working.
+ * Authenticated routes need Supabase (to read and write the data) AND Privy (to
+ * verify the incoming identity token). Until BOTH are fully configured, those
+ * routes report not-configured instead of half-working.
  */
+/** Service role only — nothing mints session JWTs, so no JWT secret. */
 const supabaseConfigured =
-  nonEmpty(e.SUPABASE_URL) &&
-  nonEmpty(e.SUPABASE_SERVICE_ROLE_KEY) &&
-  nonEmpty(e.SUPABASE_JWT_SECRET);
+  nonEmpty(e.SUPABASE_URL) && nonEmpty(e.SUPABASE_SERVICE_ROLE_KEY);
 
 const privyConfigured =
   nonEmpty(e.PRIVY_APP_ID) && nonEmpty(e.PRIVY_VERIFICATION_KEY);
+
+/** Separate flag so sign-in can work while wallet resolution is unconfigured. */
+const privyWalletResolution =
+  nonEmpty(e.PRIVY_APP_ID) && nonEmpty(e.PRIVY_APP_SECRET);
+
+/**
+ * The verification key is an ES256 public key, not the app id — easy to confuse,
+ * both come from the same dashboard page. Getting it wrong 401s every request
+ * silently, so fail at startup instead.
+ */
+if (nonEmpty(e.PRIVY_VERIFICATION_KEY)) {
+  const key = e.PRIVY_VERIFICATION_KEY.trim();
+  const looksLikeAppId = key === e.PRIVY_APP_ID || key.length < 80;
+  if (looksLikeAppId && !key.includes("-----BEGIN")) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "Invalid PRIVY_VERIFICATION_KEY: expected an ES256 public key (base64 SPKI, " +
+        "optionally PEM-armoured) from Privy Dashboard -> Configuration -> App settings. " +
+        `Got a ${key.length}-character value, which looks like an app id. ` +
+        "Every token verification would fail with a 401.",
+    );
+    process.exit(1);
+  }
+}
 
 export const config = {
   env: e.NODE_ENV,
@@ -77,27 +102,24 @@ export const config = {
   port: e.PORT,
   logLevel: e.LOG_LEVEL,
 
-  clickhouse: {
-    url: e.CH_URL,
-    database: e.CH_DATABASE,
-    username: e.CH_USERNAME,
-    password: e.CH_PASSWORD,
-    dex: e.CH_DEX, // "" means "no dex filter"
+  hyperliquid: {
+    /** The HIP-3 builder dex the app trades. "" means the default perp dex. */
+    dex: e.HL_DEX,
   },
 
   supabase: {
     configured: supabaseConfigured,
     url: e.SUPABASE_URL || "",
     serviceRoleKey: e.SUPABASE_SERVICE_ROLE_KEY || "",
-    anonKey: e.SUPABASE_ANON_KEY || "",
-    jwtSecret: e.SUPABASE_JWT_SECRET || "",
-    sessionTtlSeconds: e.SESSION_JWT_TTL_SECONDS,
   },
 
   privy: {
     configured: privyConfigured,
+    /** True when we can call Privy's API to resolve embedded wallets. */
+    canResolveWallet: privyWalletResolution,
     appId: e.PRIVY_APP_ID || "",
     verificationKey: e.PRIVY_VERIFICATION_KEY || "",
+    appSecret: e.PRIVY_APP_SECRET || "",
   },
 
   /** The auth bridge is live only when both halves are present. */
@@ -105,15 +127,23 @@ export const config = {
     configured: supabaseConfigured && privyConfigured,
   },
 
-  hyperliquid: {
-    configured: nonEmpty(e.HL_PROXY_URL) && nonEmpty(e.HL_PROXY_KEY),
-    proxyUrl: e.HL_PROXY_URL || "",
-    proxyKey: e.HL_PROXY_KEY || "",
-  },
-
   benzinga: {
     configured: nonEmpty(e.BENZINGA_API_KEY),
     apiKey: e.BENZINGA_API_KEY || "",
+  },
+
+  takes: {
+    windowSeconds: e.TAKE_WINDOW_SECONDS,
+    maxLength: e.TAKE_MAX_LENGTH,
+  },
+
+  apns: {
+    configured:
+      nonEmpty(e.APNS_KEY) && nonEmpty(e.APNS_KEY_ID) && nonEmpty(e.APNS_TEAM_ID),
+    key: e.APNS_KEY || "",
+    keyId: e.APNS_KEY_ID || "",
+    teamId: e.APNS_TEAM_ID || "",
+    bundleId: e.APNS_BUNDLE_ID,
   },
 } as const;
 

@@ -1,0 +1,14 @@
+[Unit]
+Description=hl-api: detect liquidations and notify
+
+[Timer]
+# One HL fills call per wallet that holds or recently held risk, resuming from
+# fills_checked_at with an overlap. A minute is plenty: the notification is past
+# tense, so arriving a few seconds sooner changes nothing — and being correct
+# and exactly-once matters far more than being fast.
+OnCalendar=*-*-* *:*:00
+Persistent=false
+Unit=hl-api-job@detect-liquidations.service
+
+[Install]
+WantedBy=timers.target

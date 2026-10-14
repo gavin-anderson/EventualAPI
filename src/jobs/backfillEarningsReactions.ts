@@ -1,7 +1,7 @@
 /**
  * Job: Backfill Earnings Reactions (one-time / on-demand)
  *
- * Fills `earnings_history.price_change_24h_pct` for rows that ClickHouse can't
+ * Fills `earnings_history.price_change_24h_pct` for rows that Hyperliquid can't
  * compute — i.e. earnings that happened BEFORE the Hyperliquid perp market existed
  * (no candles). Historical daily closes come from a free, key-free source (Yahoo
  * chart API — see lib/dailyPrices), since the reaction is a property of the
@@ -15,7 +15,7 @@
  * (earnings_history has no session column, so the session is derived from the ET
  * clock of reported_at; session-only historical rows default to 20:00 ET = post.)
  *
- * Stored as a PERCENT (e.g. -8.86), matching the ClickHouse-computed values.
+ * Stored as a PERCENT (e.g. -8.86), matching the HL-candle-computed values.
  *
  * Usage: node dist/jobs/run.js backfill-earnings-reactions [TICKER ...]
  *   with no tickers → every row where price_change_24h_pct IS NULL.

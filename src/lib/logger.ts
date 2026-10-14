@@ -18,7 +18,6 @@ export const logger = pino({
   redact: {
     paths: [
       "req.headers.authorization",
-      'req.headers["x-proxy-key"]',
       "*.password",
       "*.serviceRoleKey",
       "*.jwtSecret",

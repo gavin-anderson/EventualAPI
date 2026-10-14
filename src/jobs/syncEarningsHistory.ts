@@ -2,22 +2,18 @@
  * Job: Earnings History Sync
  *
  * Fetches past earnings releases from Benzinga (EPS actual, estimate, surprise)
- * and enriches each row with price_change_24h_pct computed from ClickHouse
+ * and enriches each row with price_change_24h_pct computed from Hyperliquid
  * candles centred around the reported_at timestamp.
  *
  * Scheduling: deferred — export the function for the scheduler to call.
  * Run frequency: daily or after any known earnings release.
  */
-import { query } from "../lib/clickhouse.js";
+import { fetchCandles } from "../lib/hyperliquid.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { fetchHistoricalEarnings, isExactTime } from "../lib/benzinga.js";
 import { etToUtcIso } from "../lib/datetime.js";
 import { config } from "../config/env.js";
 import { logger } from "../lib/logger.js";
-
-interface CandlePriceRow {
-  close: number;
-}
 
 export async function syncEarningsHistory(): Promise<void> {
   const log = logger.child({ job: "syncEarningsHistory" });
@@ -63,7 +59,7 @@ export async function syncEarningsHistory(): Promise<void> {
         const exact = isExactTime(e.time);
         const reportedAt = etToUtcIso(e.date, exact ? e.time : "20:00:00");
 
-        // Compute 24h price change from ClickHouse candles around reportedAt
+        // Compute 24h price change from HL candles around reportedAt
         const priceChangePct = await compute24hPriceChange(asset.hl_coin, reportedAt).catch(
           () => null,
         );
@@ -76,9 +72,9 @@ export async function syncEarningsHistory(): Promise<void> {
           eps_surprise_pct: e.eps_surprise_percent ? Number(e.eps_surprise_percent) : null,
           source:           "benzinga",
         };
-        // Only write the reaction when ClickHouse actually computed one. Omitting the
+        // Only write the reaction when HL actually had candles for it. Omitting the
         // column on conflict PRESERVES an existing value (e.g. a Stooq backfill) instead
-        // of clobbering it with null; ClickHouse wins for the dates it does cover.
+        // of clobbering it with null; HL wins for the dates it does cover.
         if (priceChangePct !== null) row.price_change_24h_pct = priceChangePct;
 
         const { error } = await sb.from("earnings_history").upsert(row, {
@@ -100,11 +96,13 @@ export async function syncEarningsHistory(): Promise<void> {
 }
 
 /**
- * Compute the 24h price change around an earnings release by comparing
- * the close price of the 1h candle just before the event to the close price
- * of the 1h candle 24h after the event.
+ * Compute the 24h price change around an earnings release by comparing the close
+ * of the 1h candle just before the event to the close of the 1h candle 24h after.
  *
- * Uses mark_px via candles (HL perp price, not equity spot price).
+ * Reads Hyperliquid candles directly (mark price on the perp, not equity spot).
+ * HL only has candles since the perp listed, so reports that predate the market
+ * return null — those are filled by the `backfill-earnings-reactions` job from a
+ * daily-close source instead.
  */
 async function compute24hPriceChange(
   coin: string,
@@ -113,36 +111,40 @@ async function compute24hPriceChange(
   const reportedMs = new Date(reportedAt).getTime();
   if (isNaN(reportedMs)) return null;
 
-  const db = config.clickhouse.database;
-  const dex = config.clickhouse.dex || undefined;
-  const dexFilter = dex ? "AND dex = {dex:String}" : "";
-  const params: Record<string, unknown> = {
+  const preMs = reportedMs - 3_600_000;          // 1h before the release
+  const postMs = reportedMs + 24 * 3_600_000;    // 24h after it
+
+  // One request spans both sample points, padded 2h each side so a missing
+  // candle at the boundary still has a neighbour to fall back on.
+  const candles = await fetchCandles(
+    config.hyperliquid.dex,
     coin,
-    before: Math.floor((reportedMs - 3_600_000) / 1000),        // 1h before
-    after:  Math.floor((reportedMs + 24 * 3_600_000) / 1000),   // 24h after
+    "1h",
+    preMs - 2 * 3_600_000,
+    postMs + 2 * 3_600_000,
+  );
+  if (candles.length === 0) return null;
+
+  // Latest candle at or before each sample point — the equivalent of the old
+  // argMax(close, open_ts) per bucket.
+  const closeAtOrBefore = (atMs: number): number | null => {
+    let best: number | null = null;
+    let bestT = -Infinity;
+    for (const c of candles) {
+      if (c.t <= atMs && c.t > bestT) {
+        const close = Number(c.c);
+        if (Number.isFinite(close)) {
+          best = close;
+          bestT = c.t;
+        }
+      }
+    }
+    return best;
   };
-  if (dex) params.dex = dex;
 
-  const [rows] = await Promise.all([
-    query<CandlePriceRow & { label: string }>(
-      "earnings_price_change",
-      `SELECT
-         multiIf(open_ts <= fromUnixTimestamp({before:Int64}), 'pre', 'post') AS label,
-         argMax(close_px, open_ts) AS close
-       FROM ${db}.candles
-       WHERE coin = {coin:String}
-         AND interval = '1h'
-         AND open_ts BETWEEN fromUnixTimestamp({before:Int64}) - INTERVAL 2 HOUR
-               AND fromUnixTimestamp({after:Int64}) + INTERVAL 2 HOUR
-         ${dexFilter}
-       GROUP BY label`,
-      params,
-    ),
-  ]);
-
-  const pre  = rows.find((r) => r.label === "pre")?.close;
-  const post = rows.find((r) => r.label === "post")?.close;
+  const pre = closeAtOrBefore(preMs);
+  const post = closeAtOrBefore(postMs);
 
   if (!pre || !post || pre === 0) return null;
-  return Number(((post - pre) / pre * 100).toFixed(4));
+  return Number((((post - pre) / pre) * 100).toFixed(4));
 }
