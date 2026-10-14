@@ -23,7 +23,7 @@ Jobs (registry in `src/jobs/run.ts`):
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
 | `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
-| `detect-liquidations` | `liquidation_events` + a push | every minute |
+| `detect-liquidations` | `liquidation_events` + a push; closes the `positions` row on a full liquidation | every minute |
 
 ## Liquidation tracking
 
