@@ -1,16 +1,31 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isExactTime, toSession, type BenzingaEarning } from "./benzinga.js";
-import { etToUtcIso } from "./datetime.js";
+import { etDateOf, etToUtcIso } from "./datetime.js";
 
 /**
  * Shared transform + upsert for earnings_events, used by BOTH the full daily
  * calendar sync and the higher-frequency imminent refresh, so the mapping from
- * a Benzinga record to a stored row lives in exactly one place.
+ * a source record to a stored row lives in exactly one place.
  *
  * Rows are keyed on (asset_id, period, period_year) — the fiscal quarter — NOT
  * on earnings_at, so a revised time UPDATES the quarter's row instead of
  * inserting a duplicate.
  */
+
+/**
+ * A vendor-neutral scheduled earnings release. Alpha Vantage supplies the date,
+ * session and estimate; EDGAR later supplies `exactTime` once results are filed.
+ */
+export interface EarningsRecord {
+  date: string;                          // YYYY-MM-DD (ET)
+  /** "HH:MM:SS" ET when known to the second, else null (session only). */
+  exactTime: string | null;
+  session: "bmo" | "amc" | "dmh" | null;
+  confirmed: boolean;
+  period: string;                        // fiscal quarter, e.g. "Q4"
+  periodYear: number;                    // fiscal year
+  epsEstimate: number | null;
+  source: string;
+}
 
 export interface EarningsEventRow {
   asset_id: string;
@@ -27,7 +42,7 @@ export interface EarningsEventRow {
 
 /**
  * Default clock time (ET) for a session-only earnings slot, so timestamps are
- * at least sensibly ordered when Benzinga doesn't give an exact time:
+ * at least sensibly ordered when the exact time isn't known yet:
  *   bmo → 09:00, amc → 16:00, dmh → 12:00, unknown → 20:00 (after-hours).
  * time_precision='session' is recorded alongside so the UI can show "after
  * market close" rather than a fake precise time.
@@ -41,30 +56,22 @@ export function sessionDefaultTime(session: "bmo" | "amc" | "dmh" | null): strin
   }
 }
 
-/** Calendar-quarter fallback (Q1..Q4) when Benzinga omits the fiscal period. */
-export function deriveQuarter(date: string): string {
-  const month = Number(date.slice(5, 7));
-  return `Q${Math.floor((month - 1) / 3) + 1}`;
-}
-
-/** Map a Benzinga earnings record to a stored earnings_events row. */
+/** Map an earnings record to a stored earnings_events row. */
 export function buildEarningsEventRow(
   assetId: string,
-  e: BenzingaEarning,
+  e: EarningsRecord,
 ): EarningsEventRow {
-  const exact = isExactTime(e.time);
-  const session = toSession(e.time);
-  const clock = exact ? e.time : sessionDefaultTime(session);
+  const exact = e.exactTime !== null;
   return {
     asset_id: assetId,
-    period: e.period || deriveQuarter(e.date),
-    period_year: e.period_year || Number(e.date.slice(0, 4)),
-    earnings_at: etToUtcIso(e.date, clock),
+    period: e.period,
+    period_year: e.periodYear,
+    earnings_at: etToUtcIso(e.date, e.exactTime ?? sessionDefaultTime(e.session)),
     time_precision: exact ? "exact" : "session",
-    session: exact ? null : session,
-    is_confirmed: e.date_confirmed === 1,
-    expected_eps: e.eps_est ? Number(e.eps_est) : null,
-    source: "benzinga",
+    session: exact ? null : e.session,
+    is_confirmed: e.confirmed,
+    expected_eps: e.epsEstimate,
+    source: e.source,
     fetched_at: new Date().toISOString(),
   };
 }
@@ -76,42 +83,63 @@ export interface UpsertResult {
   error?: string;
 }
 
+interface ExistingRow {
+  earnings_at: string;
+  time_precision: string;
+  session: "bmo" | "amc" | "dmh" | null;
+  is_confirmed: boolean;
+  source: string;
+}
+
 /**
- * Upsert one earnings event. With `detectChange`, first reads the existing row
- * for the same fiscal quarter and reports whether the earnings time, precision,
- * or confirmation state actually moved — the signal the imminent refresh uses
- * (and a natural hook for a future "earnings time confirmed" push notification).
+ * Upsert one earnings event. With `detectChange`, reports whether the earnings
+ * time, precision, or confirmation state actually moved — the signal the
+ * imminent refresh uses (and a natural hook for an "earnings time confirmed"
+ * push notification).
+ *
+ * A confirmed exact time is never downgraded: once EDGAR has stamped a release,
+ * a later calendar sync for the same day only refreshes the estimate.
  */
 export async function upsertEarningsEvent(
   sb: SupabaseClient,
   assetId: string,
-  e: BenzingaEarning,
+  e: EarningsRecord,
   opts?: { detectChange?: boolean },
 ): Promise<UpsertResult> {
-  const row = buildEarningsEventRow(assetId, e);
+  let row = buildEarningsEventRow(assetId, e);
 
-  let changed = false;
-  if (opts?.detectChange) {
-    const { data: existing } = await sb
-      .from("earnings_events")
-      .select("earnings_at, time_precision, is_confirmed")
-      .eq("asset_id", assetId)
-      .eq("period", row.period)
-      .eq("period_year", row.period_year)
-      .maybeSingle();
+  const { data } = await sb
+    .from("earnings_events")
+    .select("earnings_at, time_precision, session, is_confirmed, source")
+    .eq("asset_id", assetId)
+    .eq("period", row.period)
+    .eq("period_year", row.period_year)
+    .maybeSingle();
+  const existing = data as ExistingRow | null;
 
-    if (existing) {
-      const ex = existing as {
-        earnings_at: string;
-        time_precision: string;
-        is_confirmed: boolean;
-      };
-      changed =
-        new Date(ex.earnings_at).getTime() !== new Date(row.earnings_at).getTime() ||
-        ex.time_precision !== row.time_precision ||
-        ex.is_confirmed !== row.is_confirmed;
-    }
+  if (
+    existing &&
+    existing.time_precision === "exact" &&
+    existing.is_confirmed &&
+    row.time_precision !== "exact" &&
+    etDateOf(existing.earnings_at) === e.date
+  ) {
+    row = {
+      ...row,
+      earnings_at: existing.earnings_at,
+      time_precision: "exact",
+      session: existing.session,
+      is_confirmed: true,
+      source: existing.source,
+    };
   }
+
+  const changed =
+    !!opts?.detectChange &&
+    !!existing &&
+    (new Date(existing.earnings_at).getTime() !== new Date(row.earnings_at).getTime() ||
+      existing.time_precision !== row.time_precision ||
+      existing.is_confirmed !== row.is_confirmed);
 
   const { error } = await sb
     .from("earnings_events")

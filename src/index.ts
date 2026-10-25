@@ -10,6 +10,7 @@ const server = app.listen(config.port, () => {
       port: config.port,
       env: config.env,
       authBridge: config.auth.configured ? "configured" : "not_configured",
+      push: config.apns.configured ? "configured" : "not_configured",
     },
     "hl-api listening",
   );

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase.js";
 import { sendPush, type ApnsEnvironment } from "./apns.js";
 import { logger } from "./logger.js";
+import { config } from "../config/env.js";
 
 /**
  * Sending a notification: the one path every trigger goes through.
@@ -46,7 +47,11 @@ export interface NotifyInput {
 
 export type NotifyOutcome =
   | { delivered: true; devices: number }
-  | { delivered: false; reason: "muted" | "quiet_hours" | "no_device" | "push_failed"; devices: number };
+  | {
+      delivered: false;
+      reason: "muted" | "quiet_hours" | "no_device" | "push_not_configured" | "push_failed";
+      devices: number;
+    };
 
 interface Prefs {
   earnings_soon: boolean;
@@ -135,6 +140,14 @@ export async function notify(input: NotifyInput): Promise<NotifyOutcome> {
   if (devices.length === 0) {
     await insertRow(input, null, "no registered device");
     return { delivered: false, reason: "no_device", devices: 0 };
+  }
+
+  // No APNs credentials (local dev, or a deploy before the key is set): keep the
+  // inbox row and skip the send rather than failing once per device.
+  if (!config.apns.configured) {
+    logger.info({ kind: input.kind, devices: devices.length }, "apns not configured; push skipped");
+    await insertRow(input, null, "apns not configured");
+    return { delivered: false, reason: "push_not_configured", devices: devices.length };
   }
 
   // Unread count after this one, so the badge is right.

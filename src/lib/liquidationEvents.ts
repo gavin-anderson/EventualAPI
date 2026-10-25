@@ -27,6 +27,7 @@ export interface DetectResult {
   walletsScanned: number;
   eventsFound: number;
   notified: number;
+  positionsClosed: number;
   errors: number;
 }
 
@@ -41,7 +42,7 @@ interface Candidate {
  * sharing a timestamp. They are grouped into the single event they are, so the
  * user hears about it once with the full size and loss.
  */
-interface Grouped {
+export interface Grouped {
   coin: string;
   side: "long" | "short";
   liquidatedAt: Date;
@@ -50,9 +51,21 @@ interface Grouped {
   markPx: number | null;
   method: string | null;
   fillCount: number;
+  /** Fees across the event's fills, carried onto the closed position rows. */
+  fee: number;
+  /**
+   * Size still held once the event's fills settle. Zero means the position is
+   * gone; anything above is a partial liquidation, and the position stays open.
+   */
+  remaining: number;
 }
 
-function group(fills: HlFill[], wallet: string): Grouped[] {
+/** Size left after one fill: it closes `sz` of `|startPosition|`. */
+function remainingAfter(f: HlFill): number {
+  return Math.max(0, Math.abs(Number(f.startPosition) || 0) - (Number(f.sz) || 0));
+}
+
+export function group(fills: HlFill[], wallet: string): Grouped[] {
   const own = wallet.toLowerCase();
   const byEvent = new Map<string, Grouped>();
 
@@ -65,12 +78,17 @@ function group(fills: HlFill[], wallet: string): Grouped[] {
     const key = `${coin}:${f.time}`;
     const size = Number(f.sz) || 0;
     const pnl = Number(f.closedPnl) || 0;
+    const fee = Number(f.fee) || 0;
 
     const existing = byEvent.get(key);
     if (existing) {
       existing.size += size;
       existing.realizedPnl += pnl;
+      existing.fee += fee;
       existing.fillCount += 1;
+      // The fills share a timestamp, so their order is not trusted: the
+      // smallest remainder is the one left after all of them.
+      existing.remaining = Math.min(existing.remaining, remainingAfter(f));
       continue;
     }
     byEvent.set(key, {
@@ -84,6 +102,8 @@ function group(fills: HlFill[], wallet: string): Grouped[] {
       markPx: Number(liq.markPx) || null,
       method: liq.method ?? null,
       fillCount: 1,
+      fee,
+      remaining: remainingAfter(f),
     });
   }
   return [...byEvent.values()];
@@ -99,7 +119,13 @@ function group(fills: HlFill[], wallet: string): Grouped[] {
  */
 export async function detectLiquidations(budget = 100): Promise<DetectResult> {
   const db = supabaseAdmin();
-  const result: DetectResult = { walletsScanned: 0, eventsFound: 0, notified: 0, errors: 0 };
+  const result: DetectResult = {
+    walletsScanned: 0,
+    eventsFound: 0,
+    notified: 0,
+    positionsClosed: 0,
+    errors: 0,
+  };
 
   // Only wallets that hold or recently held risk. A wallet that has never had a
   // position cannot have been liquidated.
@@ -126,6 +152,10 @@ export async function detectLiquidations(budget = 100): Promise<DetectResult> {
       for (const e of events) {
         const inserted = await recordAndNotify(w.user_id, w.wallet_address, e);
         if (inserted) result.notified += 1;
+        // Run on every scan of the event, not only the first: closing is
+        // idempotent, and a failure here then retries on the overlap re-scan
+        // instead of being hidden behind the already-recorded event row.
+        result.positionsClosed += await closeLiquidatedPositions(w.user_id, e);
       }
 
       await db
@@ -195,4 +225,88 @@ async function recordAndNotify(
     "liquidation detected and notified",
   );
   return true;
+}
+
+// ── Closing the position rows ────────────────────────────────────────────────
+
+/** The open-row fields the close needs. */
+export interface OpenRow {
+  id: string;
+  size: number;
+}
+
+export interface ClosePatch {
+  id: string;
+  closed_at: string;
+  exit_px: number | null;
+  realized_pnl: number;
+  close_fee_paid: number;
+}
+
+/**
+ * The updates that close `rows` for a full liquidation.
+ *
+ * Usually one row. More than one happens when adding to a position left an
+ * extra open row; all of them were the one HL position, so all close, and the
+ * loss and fees are split by size so the feed doesn't count them twice.
+ *
+ * There is no `close_cloid` (HL placed these orders, not the app) and so no
+ * close take window: nobody posts a take on being liquidated.
+ */
+export function planLiquidationCloses(rows: OpenRow[], e: Grouped): ClosePatch[] {
+  const total = rows.reduce((sum, r) => sum + (Number(r.size) || 0), 0);
+  return rows.map((r) => {
+    const share = total > 0 ? (Number(r.size) || 0) / total : 1 / rows.length;
+    return {
+      id: r.id,
+      closed_at: e.liquidatedAt.toISOString(),
+      // Mark, not the fill px: HL liquidates against mark, and the fills of one
+      // event land at several prices.
+      exit_px: e.markPx,
+      realized_pnl: e.realizedPnl * share,
+      close_fee_paid: e.fee * share,
+    };
+  });
+}
+
+/**
+ * Close the user's open rows for a liquidated position. Returns how many closed.
+ *
+ * Only a FULL liquidation closes anything: after a partial one the user still
+ * holds the rest, and the row stays open. Only rows opened before the
+ * liquidation match, so a position reopened since — same coin, same side — is
+ * left alone, which is also what makes a re-scan a no-op.
+ */
+export async function closeLiquidatedPositions(userId: string, e: Grouped): Promise<number> {
+  if (e.remaining > 0) return 0;
+  const db = supabaseAdmin();
+
+  const { data, error } = await db
+    .from("positions")
+    .select("id, size")
+    .eq("user_id", userId)
+    .eq("coin", e.coin)
+    .eq("side", e.side)
+    .is("closed_at", null)
+    .lte("opened_at", e.liquidatedAt.toISOString());
+  if (error) throw new Error(`liquidated position lookup failed: ${error.message}`);
+
+  let closed = 0;
+  for (const { id, ...patch } of planLiquidationCloses((data as OpenRow[]) ?? [], e)) {
+    const { data: updated, error: updateError } = await db
+      .from("positions")
+      .update(patch)
+      .eq("id", id)
+      // Re-checked in WHERE so a concurrent close (the app's, or another scan)
+      // isn't overwritten.
+      .is("closed_at", null)
+      .select("id");
+    if (updateError) throw new Error(`closing liquidated position failed: ${updateError.message}`);
+    closed += ((updated as unknown[]) ?? []).length;
+  }
+
+  if (closed > 0) {
+    logger.info({ coin: e.coin, side: e.side, closed }, "closed liquidated position rows");
+  }
+  return closed;
 }

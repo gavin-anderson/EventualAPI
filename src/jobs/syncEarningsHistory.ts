@@ -1,26 +1,51 @@
 /**
  * Job: Earnings History Sync
  *
- * Fetches past earnings releases from Benzinga (EPS actual, estimate, surprise)
- * and enriches each row with price_change_24h_pct computed from Hyperliquid
- * candles centred around the reported_at timestamp.
+ * Fetches past earnings releases from Alpha Vantage (EPS actual, estimate,
+ * surprise, pre/post-market) and pins each to its exact release second from
+ * SEC EDGAR where the 8-K is on file. Each row is enriched with
+ * price_change_24h_pct computed from Hyperliquid candles around reported_at.
  *
- * Scheduling: deferred — export the function for the scheduler to call.
- * Run frequency: daily or after any known earnings release.
+ * Alpha Vantage history is one request per ticker and the free key allows 25 a
+ * day (the calendar sync uses one), so each run spends at most `maxCalls`,
+ * most-needed tickers first: never synced, then those with a release since
+ * their last history row. A first backfill of every ticker spreads over a few
+ * days; after that a run only touches tickers that just reported.
+ *
+ * Only SEC filers are attempted: Alpha Vantage has no data for the non-US
+ * listings either, so skipping them saves calls.
+ *
+ * Run frequency: daily, or on demand with explicit tickers.
  */
 import { fetchCandles } from "../lib/hyperliquid.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { fetchHistoricalEarnings, isExactTime } from "../lib/benzinga.js";
-import { etToUtcIso } from "../lib/datetime.js";
+import { AlphaVantageLimitError, fetchEarningsHistory, toNumber, toSession } from "../lib/alphavantage.js";
+import { fetchSubmissions, releaseOn, tickerToCik } from "../lib/edgar.js";
+import { sessionDefaultTime } from "../lib/earningsEvents.js";
+import { etDateOf, etToUtcIso } from "../lib/datetime.js";
 import { config } from "../config/env.js";
 import { logger } from "../lib/logger.js";
 
-export async function syncEarningsHistory(): Promise<void> {
-  const log = logger.child({ job: "syncEarningsHistory" });
+const HISTORY_YEARS = 3;
+/** Spacing between Alpha Vantage requests; the free tier rejects bursts. */
+const CALL_SPACING_MS = 2_000;
+
+export interface SyncHistoryOptions {
+  /** Only these tickers (still subject to maxCalls). Empty = pick by need. */
+  tickers?: string[];
+  /** Alpha Vantage requests this run may spend. Default 20 of the 25/day. */
+  maxCalls?: number;
+}
+
+type Asset = { id: string; hl_coin: string; ticker: string };
+
+export async function syncEarningsHistory(opts: SyncHistoryOptions = {}): Promise<void> {
+  const maxCalls = opts.maxCalls ?? 20;
+  const log = logger.child({ job: "syncEarningsHistory", maxCalls });
   log.info("starting");
 
-  if (!config.benzinga.configured) {
-    log.warn("BENZINGA_API_KEY not set — skipping");
+  if (!config.alphaVantage.configured) {
+    log.warn("ALPHAVANTAGE_API_KEY not set — skipping");
     return;
   }
 
@@ -35,64 +60,123 @@ export async function syncEarningsHistory(): Promise<void> {
     return;
   }
 
-  type Asset = { id: string; hl_coin: string; ticker: string };
-  const tickerToAsset = Object.fromEntries(
-    (assets as Asset[]).map((a) => [a.ticker, a]),
-  );
-  const tickers = Object.keys(tickerToAsset);
+  const queue = await pickTickers(assets as Asset[], opts.tickers ?? []);
+  log.info({ candidates: queue.length }, "tickers needing history");
 
-  const BATCH = 50;
+  let calls = 0;
   let upserted = 0;
 
-  for (let i = 0; i < tickers.length; i += BATCH) {
-    const batch = tickers.slice(i, i + BATCH);
+  for (const asset of queue) {
+    if (calls >= maxCalls) break;
+    if (calls > 0) await new Promise((r) => setTimeout(r, CALL_SPACING_MS));
+    calls++;
+
+    let quarters;
     try {
-      const earnings = await fetchHistoricalEarnings(batch);
-
-      for (const e of earnings) {
-        // Only process past releases (eps actual is set)
-        if (!e.eps) continue;
-
-        const asset = tickerToAsset[e.ticker];
-        if (!asset) continue;
-
-        const exact = isExactTime(e.time);
-        const reportedAt = etToUtcIso(e.date, exact ? e.time : "20:00:00");
-
-        // Compute 24h price change from HL candles around reportedAt
-        const priceChangePct = await compute24hPriceChange(asset.hl_coin, reportedAt).catch(
-          () => null,
-        );
-
-        const row: Record<string, unknown> = {
-          asset_id:         asset.id,
-          reported_at:      reportedAt,
-          eps_actual:       Number(e.eps),
-          eps_estimate:     e.eps_est ? Number(e.eps_est) : null,
-          eps_surprise_pct: e.eps_surprise_percent ? Number(e.eps_surprise_percent) : null,
-          source:           "benzinga",
-        };
-        // Only write the reaction when HL actually had candles for it. Omitting the
-        // column on conflict PRESERVES an existing value (e.g. a Stooq backfill) instead
-        // of clobbering it with null; HL wins for the dates it does cover.
-        if (priceChangePct !== null) row.price_change_24h_pct = priceChangePct;
-
-        const { error } = await sb.from("earnings_history").upsert(row, {
-          onConflict: "asset_id,reported_at",
-        });
-
-        if (error) {
-          log.error({ ticker: e.ticker, error: error.message }, "upsert failed");
-        } else {
-          upserted++;
-        }
-      }
+      quarters = await fetchEarningsHistory(asset.ticker);
     } catch (err) {
-      log.error({ batch, err }, "batch failed — continuing");
+      if (err instanceof AlphaVantageLimitError) {
+        log.warn({ ticker: asset.ticker, err: err.message }, "Alpha Vantage limit reached — stopping");
+        break;
+      }
+      log.error({ ticker: asset.ticker, err }, "history fetch failed — continuing");
+      continue;
+    }
+
+    const subs = await fetchSubmissions(asset.ticker).catch(() => null);
+    const cutoff = new Date(Date.now() - HISTORY_YEARS * 365 * 86_400_000).toISOString().slice(0, 10);
+
+    // Existing rows by ET report date, so a re-sync (or an EDGAR time a few
+    // seconds off the old vendor's) updates the row instead of duplicating it.
+    const { data: existing } = await sb
+      .from("earnings_history")
+      .select("id, reported_at")
+      .eq("asset_id", asset.id);
+    const existingByDate = new Map(
+      ((existing ?? []) as Array<{ id: string; reported_at: string }>).map((r) => [etDateOf(r.reported_at), r.id]),
+    );
+
+    for (const q of quarters) {
+      const epsActual = toNumber(q.reportedEPS);
+      if (epsActual === null || q.reportedDate < cutoff) continue;
+
+      const released = subs ? releaseOn(subs.earningsReleases, q.reportedDate) : null;
+      const reportedAt = released ?? etToUtcIso(q.reportedDate, sessionDefaultTime(toSession(q.reportTime)));
+
+      // Compute 24h price change from HL candles around reportedAt
+      const priceChangePct = await compute24hPriceChange(asset.hl_coin, reportedAt).catch(
+        () => null,
+      );
+
+      const surprisePct = toNumber(q.surprisePercentage);
+      const row: Record<string, unknown> = {
+        asset_id:         asset.id,
+        reported_at:      reportedAt,
+        eps_actual:       epsActual,
+        eps_estimate:     toNumber(q.estimatedEPS),
+        // Alpha Vantage gives a percent; the column is a fraction (0.0361 == 3.61%).
+        eps_surprise_pct: surprisePct === null ? null : Number((surprisePct / 100).toFixed(6)),
+        source:           released ? "alphavantage+edgar" : "alphavantage",
+      };
+      // Only write the reaction when HL actually had candles for it. Omitting the
+      // column PRESERVES an existing value (e.g. a Yahoo backfill) instead of
+      // clobbering it with null; HL wins for the dates it does cover.
+      if (priceChangePct !== null) row.price_change_24h_pct = priceChangePct;
+
+      const existingId = existingByDate.get(q.reportedDate);
+      const { error } = existingId
+        ? await sb.from("earnings_history").update(row).eq("id", existingId)
+        : await sb.from("earnings_history").upsert(row, { onConflict: "asset_id,reported_at" });
+
+      if (error) {
+        log.error({ ticker: asset.ticker, error: error.message }, "upsert failed");
+      } else {
+        upserted++;
+      }
     }
   }
 
-  log.info({ upserted }, "done");
+  log.info({ calls, upserted, remaining: Math.max(0, queue.length - calls) }, "done");
+}
+
+/**
+ * Order tickers by need: never synced first, then those whose latest past
+ * earnings event is newer than their latest history row. Tickers already up to
+ * date are left out. Non-SEC filers are skipped.
+ */
+async function pickTickers(assets: Asset[], only: string[]): Promise<Asset[]> {
+  const ciks = await tickerToCik();
+  const wanted = only.map((t) => t.toUpperCase());
+  const pool = assets.filter((a) =>
+    wanted.length ? wanted.includes(a.ticker.toUpperCase()) : ciks.has(a.ticker.toUpperCase()),
+  );
+  if (wanted.length) return pool;
+
+  const sb = supabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const [{ data: hist }, { data: events }] = await Promise.all([
+    sb.from("earnings_history").select("asset_id, reported_at"),
+    sb.from("earnings_events").select("asset_id, earnings_at").lt("earnings_at", nowIso),
+  ]);
+
+  const latest = (rows: Array<{ asset_id: string; at: string }>) => {
+    const m = new Map<string, string>();
+    for (const r of rows) if (!m.has(r.asset_id) || r.at > m.get(r.asset_id)!) m.set(r.asset_id, r.at);
+    return m;
+  };
+  const lastHistory = latest(((hist ?? []) as Array<{ asset_id: string; reported_at: string }>)
+    .map((r) => ({ asset_id: r.asset_id, at: r.reported_at })));
+  const lastEvent = latest(((events ?? []) as Array<{ asset_id: string; earnings_at: string }>)
+    .map((r) => ({ asset_id: r.asset_id, at: r.earnings_at })));
+
+  const never = pool.filter((a) => !lastHistory.has(a.id));
+  // A day's slack so a history row a few hours off the event's stored time still counts.
+  const behind = pool.filter((a) => {
+    const h = lastHistory.get(a.id);
+    const e = lastEvent.get(a.id);
+    return h && e && new Date(e).getTime() - new Date(h).getTime() > 86_400_000;
+  });
+  return [...never, ...behind];
 }
 
 /**

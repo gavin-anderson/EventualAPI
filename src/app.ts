@@ -14,8 +14,9 @@ import { watchlistRouter } from "./routes/watchlist.js";
 export function createApp(): Express {
   const app = express();
 
-  // Behind a reverse proxy (Caddy/Tailscale); trust it for client IP + proto.
-  app.set("trust proxy", true);
+  // Heroku's router is the one hop in front of us. Trusting more would let the
+  // client pick req.ip via X-Forwarded-For.
+  app.set("trust proxy", 1);
   app.disable("x-powered-by");
 
   app.use(express.json({ limit: "256kb" }));

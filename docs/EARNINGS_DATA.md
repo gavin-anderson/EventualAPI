@@ -2,20 +2,18 @@
 
 Brief status note — we'll circle back to expand coverage.
 
-## The blocker: Benzinga key is a limited/trial plan
+## Sources (since 2026-10-25)
 
-The current `BENZINGA_API_KEY` only returns earnings for **AAPL, MSFT, IBM, INTC**
-(~4–5 quarters each). Every other ticker returns an empty array. Verified 2026‑07‑26:
+Benzinga was dropped: the trial key covered only AAPL/MSFT/IBM/INTC and the full
+plan is too expensive. See `EARNINGS_SOURCE_OPTIONS.md` for the comparison.
 
-```
-AAPL: 4   MSFT: 4   IBM: 5   INTC: 5     ← entitled
-TSLA, META, MU, AMD, GOOGL, AMZN: []     ← not entitled
-```
-
-**Impact:** only 4 of the 52 `equity`-kind assets have any `earnings_events` /
-`earnings_history` rows. This is a data-entitlement limit, not a code bug. The sync
-jobs (`sync-earnings-calendar`, `sync-earnings-history`) work correctly; they just
-get nothing back for un-entitled tickers.
+- **Alpha Vantage** — calendar (date, pre/post-market, EPS estimate; one call for the
+  whole market) and per-ticker history (EPS actual/estimate/surprise). Free key =
+  25 calls/day, personal use; needs a commercial licence before public launch.
+- **SEC EDGAR** — exact release second (8-K Item 2.02 `acceptanceDateTime`) and each
+  company's fiscal year end (for correct quarter labels). Free, public domain.
+- **Not covered:** HYUNDAI, IBIDEN, KIOXIA, SMSN, SOFTBANK, BMNR (enter manually).
+  6-K filers (ARM, ASML, BABA, NBIS, TSM) get dates/sessions but no exact time.
 
 ## Reaction (`price_change_24h_pct`) — how it's filled
 
@@ -40,17 +38,7 @@ Details:
 - **Field scales:** `price_change_24h_pct` is a PERCENT (e.g. -8.86); `eps_surprise_pct`
   is a FRACTION (0.0361 == 3.61%). The app divides the reaction by 100, not the surprise.
 
-## To get earnings + reactions for ALL assets (next pass)
-
-Reactions require earnings rows, which require broader earnings coverage. Options:
-
-- **A — Upgrade Benzinga** to full ticker coverage + deeper history. Smallest change:
-  just re-run `sync-earnings-history`, then `backfill-earnings-reactions`.
-- **B — FMP (Financial Modeling Prep)** free/cheap tier has historical earnings
-  (dates + EPS actual/estimate/surprise) AND historical daily prices for all tickers —
-  could replace both Benzinga-history and the Yahoo backfill in one source.
-- **C — Hybrid:** earnings dates/EPS from FMP (or similar) for all tickers; keep the
-  existing Yahoo reaction backfill.
+## Open
 
 Also open: `impliedMovePct` (options-implied move) has no source wired — ships `nil`
 in the app. Needs an options-data provider (ORATS / Polygon options / Tradier). See the

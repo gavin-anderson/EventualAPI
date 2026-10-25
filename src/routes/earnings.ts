@@ -55,7 +55,7 @@ const ET_CLOSE_MIN = 16 * 60;
 
 /**
  * The app's EventTiming raw value (a US-market-session label, ET-anchored — not the
- * viewer's timezone). Benzinga's session code is authoritative when present; for
+ * viewer's timezone). The calendar's session code is authoritative when present; for
  * exact-time events (session=null) we derive it from the ET clock of `earnings_at`.
  */
 function timingFor(session: "bmo" | "amc" | "dmh" | null, earningsAtISO: string): string {
