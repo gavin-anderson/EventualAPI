@@ -6,14 +6,20 @@ API service for the Hyperliquid earnings app. Serves:
 - **Authenticated, user-scoped** — sign-up, profiles, trades and takes,
   watchlist, feed and push, behind Privy access-token verification.
 
-Two data sources, no others: **Supabase** for everything we author, and
-**Hyperliquid's public `/info`** for everything priced or on-chain (direct, no
-proxy). Trading is out of scope — the app signs and submits orders itself, then
-reports them here for verification.
+Requests are served from two sources, no others: **Supabase** for everything we
+author, and **Hyperliquid's public `/info`** for everything priced or on-chain
+(direct, no proxy). Trading is out of scope — the app signs and submits orders
+itself, then reports them here for verification.
+
+Scheduled jobs fill Supabase from the outside world: **Alpha Vantage** (earnings
+dates, pre/post-market session, EPS) and **SEC EDGAR** (exact release times),
+plus Polymarket for beat odds and Hyperliquid for positions and liquidations.
+Benzinga is gone. See [docs/EARNINGS_DATA.md](docs/EARNINGS_DATA.md) and
+[docs/JOBS.md](docs/JOBS.md).
 
 ## Stack
 
-TypeScript · Node >=20 · Express · `supabase-js` · `@privy-io/server-auth` ·
+TypeScript · Node 24 · Express · `supabase-js` · `@privy-io/server-auth` ·
 `jsonwebtoken` · `pino` · `prom-client` · `zod`.
 
 ## Endpoints
@@ -70,6 +76,14 @@ Build & run as in production:
 npm run build && npm start
 ```
 
+Scheduled jobs run in a separate process (needs a build):
+
+```bash
+npm run scheduler                        # the worker: runs every job on its schedule
+npm run job -- sync-earnings-calendar    # run one job once
+npm run job:dev -- refresh-imminent      # same, via tsx without a build
+```
+
 Other scripts: `npm run typecheck`, `npm run lint`, `npm test`.
 
 ### Catalogue maintenance
@@ -94,15 +108,49 @@ npm run art -- --force           # re-upload when only object metadata changed
 destination paths contain a hash of the content, so a second run computes the
 same path and skips.
 
+## Deployment
+
+Hosted on **Heroku**, deployed by GitHub Actions
+([.github/workflows/deploy.yml](.github/workflows/deploy.yml)):
+
+- Every push and PR to `main` or `dev` runs `npm ci && npm run build`.
+- A push to `main` that builds is force-pushed to the Heroku app's git remote,
+  which builds and releases it. Repo secrets: `HEROKU_API_KEY`,
+  `HEROKU_PROD_APP` (the app name).
+
+The [Procfile](Procfile) declares two process types:
+
+| Dyno     | Command             | Runs                                             |
+| -------- | ------------------- | ------------------------------------------------ |
+| `web`    | `npm start`         | The API (`dist/index.js`) on Heroku's `$PORT`.   |
+| `worker` | `npm run scheduler` | `src/jobs/scheduler.ts`, which spawns each job.  |
+
+Scale the worker to **exactly one** dyno (`heroku ps:scale web=1 worker=1`), on
+Basic or above so it never sleeps — two schedulers would run every job twice and
+send every liquidation push twice. Details in [docs/JOBS.md](docs/JOBS.md).
+
+Environment variables are Heroku config vars (`heroku config:set KEY=value`),
+with `NODE_ENV=production`; `.env` is for local use only. `PORT` is set by
+Heroku.
+
 ## Configuration
 
-See `.env.example`. The anonymous read tier needs only `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY`.
+See `.env.example` for every variable. All are optional at boot; each feature
+stays dormant until its block is filled in.
 
-The auth bridge needs Supabase **and** Privy (`PRIVY_APP_ID`,
-`PRIVY_VERIFICATION_KEY`). `PRIVY_APP_SECRET` is separate and only enables
-embedded-wallet resolution. No JWT secret: the app never talks to Supabase
-directly, so no session is minted — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
+| Variables | Enables |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Everything. The anonymous read tier needs only these. |
+| `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | Authenticated routes (with Supabase). |
+| `PRIVY_APP_SECRET` | Embedded-wallet resolution only. |
+| `ALPHAVANTAGE_API_KEY` | The earnings calendar and history syncs. Free key: 25 requests/day, personal use. |
+| `SEC_USER_AGENT` | EDGAR lookups. SEC asks for a descriptive value with a contact email. |
+| `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID` (+ `APNS_BUNDLE_ID`) | Push delivery. Without them notifications still land in the inbox. |
+| `HL_DEX` | The HIP-3 dex the app trades (default `xyz`). |
+| `TAKE_WINDOW_SECONDS`, `TAKE_MAX_LENGTH` | Take rules (defaults 600s, 500 chars). |
+
+No JWT secret: the app never talks to Supabase directly, so no session is
+minted — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
 
 ## Supabase
 
@@ -119,12 +167,17 @@ needs an explicit `revoke` on top of RLS.
 - [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md) — Privy → Supabase flow & identity model.
 - [docs/RLS.md](docs/RLS.md) — access tiers & RLS policies.
 - [docs/ASSET_CATALOGUE.md](docs/ASSET_CATALOGUE.md) — how a market gets a row, a name and art.
+- [docs/JOBS.md](docs/JOBS.md) — scheduled jobs, cadences, the Heroku worker.
+- [docs/EARNINGS_DATA.md](docs/EARNINGS_DATA.md) — where earnings data comes from and how reactions are filled.
+- [docs/EARNINGS_SOURCE_OPTIONS.md](docs/EARNINGS_SOURCE_OPTIONS.md) — why Alpha Vantage + EDGAR replaced Benzinga.
+- [docs/hl-api.postman_collection.json](docs/hl-api.postman_collection.json) — Postman collection.
 
 ## Not yet wired
 
-- **CI/CD & hosting** — no Dockerfile, no CI, no service unit. The job timers in
-  `deploy/systemd/` cover the scheduled jobs only, not the API process.
 - **Job liveness alerting** — the earnings jobs stopped for two months in 2026
-  and nothing noticed.
-- **The app** — the iOS client does not call hl-api yet, and must attach a
-  `cloid` to its orders before the trade endpoints can verify anything.
+  and nothing noticed. A failed run is logged by the scheduler but alerts no one.
+- **A licence for the earnings data** — the Alpha Vantage key is a free,
+  personal-use one; a commercial licence is needed before public launch.
+- **The app** — the iOS integration with hl-api (including attaching a `cloid`
+  to orders for trade verification) lives on the mobile repo's
+  `prod-integration` branch and is not on `main` yet.

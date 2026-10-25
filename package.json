@@ -2,7 +2,7 @@
   "name": "hl-api",
   "version": "0.0.0",
   "private": true,
-  "description": "API service for the Hyperliquid portfolio/earnings app. Anonymous public reads from hl-ingest's ClickHouse + (later) the Privy->Supabase auth bridge.",
+  "description": "API and scheduled jobs for the Hyperliquid earnings app: Supabase-backed reads, Privy-authenticated user routes, and earnings/position sync jobs.",
   "type": "module",
   "engines": {
     "node": "24.x"

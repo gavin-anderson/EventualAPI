@@ -1,9 +1,11 @@
 # Scheduled jobs
 
-The sync jobs run **out of process** from the API server: a scheduler (systemd
-timers on a box, `src/jobs/scheduler.ts` on Heroku) invokes
-`node dist/jobs/run.js <name>`, so job work never touches the API's event loop and
-a crashing job can't take the API down.
+The sync jobs run **out of process** from the API server. In production that is
+the Heroku `worker` dyno running `src/jobs/scheduler.ts` (see
+[On Heroku](#on-heroku)); on a self-hosted box the systemd timers in
+`deploy/systemd/` do the same job. Either way each run is its own
+`node dist/jobs/run.js <name>` process, so job work never touches the API's event
+loop and a crashing job can't take the API down.
 
 ## Run one manually
 
@@ -11,6 +13,8 @@ a crashing job can't take the API down.
 npm run build
 npm run job -- sync-earnings-calendar   # or job:dev for tsx (no build)
 node dist/jobs/run.js refresh-imminent
+
+heroku run npm run job -- sync-earnings-calendar   # one-off dyno on Heroku
 ```
 
 Jobs (registry in `src/jobs/run.ts`):
@@ -21,10 +25,16 @@ Jobs (registry in `src/jobs/run.ts`):
 | `sync-earnings-history` | `earnings_history` (≤20 AV calls/run, most-needed tickers first) | daily (+ on boot) |
 | `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed — EDGAR only | hourly |
 | `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only | every 5 min |
-| `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
+| `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly (systemd timer optional) |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
 | `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
 | `detect-liquidations` | `liquidation_events` + a push; closes the `positions` row on a full liquidation | every minute |
+| `backfill-earnings-reactions` | `earnings_history.price_change_24h_pct` for pre-perp dates (Yahoo) | by hand only — see [EARNINGS_DATA.md](EARNINGS_DATA.md) |
+
+The calendar and history syncs need `ALPHAVANTAGE_API_KEY`; the EDGAR lookups
+should have `SEC_USER_AGENT` set (SEC asks for a contact email in it). The free
+Alpha Vantage key allows 25 requests a day, which the daily calendar call plus up
+to 20 history calls is sized to fit.
 
 ## Liquidation tracking
 
@@ -66,14 +76,10 @@ Note `consumed` is only comparable across **isolated** positions, where runway
 is roughly 1/leverage. Under cross margin the liquidation price depends on total
 account health, so the log splits isolated from cross.
 
-```bash
-systemctl enable --now hl-api-refresh-positions.timer   hl-api-evaluate-risk.timer hl-api-detect-liquidations.timer
-```
-
-The `assets` table is maintained **manually** (ticker → name → logo; logos
-uploaded once to the `asset-logos` bucket). The earnings jobs join on it, so it
-must be seeded before they can populate anything. Calendar/history timers are
-staggered (08:15 / 08:30 UTC, +2/3 min after boot).
+The earnings jobs join on the `assets` table, so it must be populated before they
+can write anything. It is maintained by hand with the `intake` and `art` CLIs —
+see [ASSET_CATALOGUE.md](ASSET_CATALOGUE.md). Calendar/history runs are staggered
+at 08:15 / 08:30 UTC.
 
 ## The earnings-timing cadence (Approach A: static self-gating)
 
@@ -105,12 +111,15 @@ a single query that returns zero rows and exits.
 ### No duplicate jobs per event
 
 There are a **fixed number of timers regardless of event count** — the design
-structurally can't spawn a job per event. systemd won't overlap-run the same unit
-instance, and every upsert is idempotent on the fiscal-period key
+structurally can't spawn a job per event. Neither the scheduler nor systemd will
+overlap-run the same job, and every upsert is idempotent on the fiscal-period key
 `(asset_id, period, period_year)`, so even the tier overlap at a boundary just
 overwrites one row.
 
-### Restart / downtime behaviour
+### Restart / downtime behaviour (systemd)
+
+On Heroku the daily syncs deliberately do not catch up after a restart; see
+below.
 
 - `Persistent=true` on the daily discovery timers **re-runs a missed daily on
   boot** (box was down at 08:00, comes up at 10:00 → runs at 10:00).
@@ -133,8 +142,23 @@ kills a run after 10 minutes.
   restarts dynos daily and on deploy, and a run per restart would spend the
   Alpha Vantage quota. Run one by hand with `heroku run npm run job -- <name>`.
 - Changing a cadence means changing both `scheduler.ts` and its timer.
+- A failed or timed-out run is logged by the scheduler (`scheduler: job failed`)
+  and the next tick runs normally. Nothing alerts on it yet.
 
-## Install on the box (as root)
+```bash
+heroku ps                                   # web=1, worker=1
+heroku ps:scale worker=1
+heroku logs --tail --dyno worker            # job logs (JSON, via pino)
+heroku run npm run job -- refresh-imminent  # run one now
+```
+
+## Self-hosted alternative: systemd
+
+The units in `deploy/systemd/` predate Heroku and are kept for running on a box.
+They are not used in production. Same job names and the same UTC schedule as
+`scheduler.ts`.
+
+### Install on the box (as root)
 
 Assumes: app at `/opt/hl-api` (built with `npm ci && npm run build`), env at
 `/etc/hl-api/.env`, service user `hl-api`.
@@ -148,13 +172,16 @@ systemctl enable --now \
   hl-api-sync-earnings-calendar.timer \
   hl-api-sync-earnings-history.timer \
   hl-api-refresh-approaching.timer \
-  hl-api-refresh-imminent.timer
+  hl-api-refresh-imminent.timer \
+  hl-api-refresh-positions.timer \
+  hl-api-evaluate-risk.timer \
+  hl-api-detect-liquidations.timer
 
 # Optional — only if keeping Polymarket odds:
 # systemctl enable --now hl-api-sync-earnings-odds.timer
 ```
 
-## Ops
+### Ops
 
 ```bash
 systemctl list-timers 'hl-api-*'                       # next/last run times

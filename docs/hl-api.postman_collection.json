@@ -3,7 +3,7 @@
     "_postman_id": "hl-api-0000-0000-0000-000000000001",
     "name": "hl-api",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Test collection for hl-api.\n\nSet `baseUrl` (default http://localhost:8080).\n\nSCOPE: this API is called by our own mobile app and by our own scheduled jobs. It is not a public API. Every endpoint has one of those two callers; anything without one was deleted.\n\nWORKS WITH NO CREDENTIALS\n- Ops: healthz, readyz, metrics\n- Public reads: earnings calendar + per-ticker earnings detail\n  (these need Supabase creds on the SERVER, not in Postman)\n\nNEEDS A PRIVY ACCESS TOKEN\nEverything else. Paste one into `privyToken`.\n\nPostman CANNOT mint that token: Privy access tokens are ES256 JWTs signed with Privy's private key, issued only through a real sign-in in the SDK. Get one by signing in on the iOS app and reading privy.user.getAccessToken(). The app does not expose it yet.\n\nTRADES NEED MORE THAN A TOKEN\nThey verify against Hyperliquid by client order id, so they need a real filled order whose cloid you know. A valid token alone returns 409 fill_not_found. The app does not set a cloid yet."
+    "description": "Test collection for hl-api.\n\nSet `baseUrl` (default http://localhost:8080).\n\nSCOPE: this API is called by our own mobile app and by our own scheduled jobs. It is not a public API. Every endpoint has one of those two callers; anything without one was deleted.\n\nWORKS WITH NO CREDENTIALS\n- Ops: healthz, readyz, metrics\n- Public reads: earnings calendar + per-ticker earnings detail\n  (these need Supabase creds on the SERVER, not in Postman)\n\nNEEDS A PRIVY ACCESS TOKEN\nEverything else. Paste one into `privyToken`.\n\nPostman CANNOT mint that token: Privy access tokens are ES256 JWTs signed with Privy's private key, issued only through a real sign-in in the SDK. Get one by signing in on the iOS app and reading privy.user.getAccessToken().\n\nTRADES NEED MORE THAN A TOKEN\nThey verify against Hyperliquid by client order id, so they need a real filled order whose cloid you know. A valid token alone returns 409 fill_not_found. The iOS app attaches one to every order it reports."
   },
   "item": [
     {
@@ -244,6 +244,62 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Upload avatar",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "image/jpeg"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/profile/avatar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "profile",
+                "avatar"
+              ]
+            },
+            "description": "AUTHENTICATED. Raw image bytes, not multipart. Pick a file under Body > binary and set Content-Type to match: image/jpeg, image/png, image/webp, image/heic or image/heif. Max 12 MB.\n\nRe-encoded to a 512px square WebP (which strips EXIF/GPS) and stored in the public avatars bucket. Returns the updated profile.\n\n400 if the bytes are not a readable image, or if no profile exists yet (call signup first).",
+            "body": {
+              "mode": "file",
+              "file": {}
+            }
+          }
+        },
+        {
+          "name": "Remove avatar",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/profile/avatar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "profile",
+                "avatar"
+              ]
+            },
+            "description": "AUTHENTICATED. Idempotent. Clears the photo; the app falls back to its drawn default. Returns the updated profile."
           }
         }
       ]
@@ -708,10 +764,6 @@
       "value": ""
     },
     {
-      "key": "supabaseToken",
-      "value": ""
-    },
-    {
       "key": "from",
       "value": ""
     },
@@ -730,12 +782,6 @@
       "value": "",
       "type": "string",
       "description": "Client order id from a real Hyperliquid order. Required by the trade endpoints."
-    },
-    {
-      "key": "privyDid",
-      "value": "did:privy:",
-      "type": "string",
-      "description": "A Privy DID, for the batch profile lookup."
     },
     {
       "key": "deviceToken",

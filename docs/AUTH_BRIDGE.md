@@ -1,7 +1,9 @@
 # Auth bridge (Privy → Supabase)
 
-Privy is the identity provider; Supabase RLS expects a Supabase-signed JWT. This
-service bridges the two. **It is dormant until configured** — see "Enabling" below.
+Privy is the identity provider; Supabase holds the data. This service verifies
+the Privy token and reads and writes Supabase on the user's behalf with the
+service role. No Supabase session is minted. **It is dormant until configured**
+— see "Enabling" below.
 
 ## Flow
 

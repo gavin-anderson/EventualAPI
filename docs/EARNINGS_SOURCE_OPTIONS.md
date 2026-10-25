@@ -1,5 +1,11 @@
 # Replacing Benzinga for the earnings schedule
 
+> **Status (2026-10-25): decided and implemented.** Alpha Vantage (free personal
+> key) plus SEC EDGAR replaced Benzinga; the "Code change" section below is now in
+> `src/lib/alphavantage.ts`, `src/lib/edgar.ts` and the earnings jobs. A commercial
+> licence is still needed before public launch. Current behaviour is described in
+> [EARNINGS_DATA.md](EARNINGS_DATA.md); this file is kept as the decision record.
+
 Checked 2026-10-25 against our 61 `equity` assets in Supabase. **Verified** = I ran
 it live today. **Assumed** = from docs/search or inference, not tested.
 
