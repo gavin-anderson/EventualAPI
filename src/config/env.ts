@@ -44,6 +44,9 @@ const schema = z.object({
   APNS_KEY_ID: z.string().optional().or(z.literal("")),
   APNS_TEAM_ID: z.string().optional().or(z.literal("")),
   APNS_BUNDLE_ID: z.string().default("buzz.Earnings"),
+
+  // Bearer secret for GET /metrics. Unset, the endpoint answers 404.
+  METRICS_TOKEN: z.string().optional().or(z.literal("")),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -150,6 +153,10 @@ export const config = {
     keyId: e.APNS_KEY_ID || "",
     teamId: e.APNS_TEAM_ID || "",
     bundleId: e.APNS_BUNDLE_ID,
+  },
+
+  metrics: {
+    token: e.METRICS_TOKEN || "",
   },
 } as const;
 

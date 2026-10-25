@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
+import express from "express";
 import { createApp } from "./app.js";
+import { createMetricsRouter } from "./routes/metrics.js";
 
 /**
  * Smoke tests that don't require live upstreams: liveness, input validation, and
@@ -39,8 +41,51 @@ describe("ops", () => {
     expect(await res.json()).toEqual({ status: "ok" });
   });
 
-  it("GET /metrics -> prometheus text", async () => {
+  it("GET /metrics refuses a request with no token", async () => {
+    // 404 with METRICS_TOKEN unset, 401 with it set. Never the metrics.
     const res = await fetch(`${base}/metrics`);
+    expect([401, 404]).toContain(res.status);
+  });
+
+  it("unmatched paths share one route label", async () => {
+    await fetch(`${base}/no-such-route-${Date.now()}`);
+    const { registry } = await import("./lib/metrics.js");
+    const text = await registry.metrics();
+    expect(text).toContain('route="unmatched"');
+    expect(text).not.toContain("no-such-route");
+  });
+});
+
+describe("metrics token", () => {
+  let metricsServer: Server;
+  let metricsBase: string;
+
+  beforeAll(async () => {
+    const app = express().use(createMetricsRouter("s3cret"));
+    await new Promise<void>((resolve) => {
+      metricsServer = app.listen(0, () => {
+        const addr = metricsServer.address();
+        metricsBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+        resolve();
+      });
+    });
+  });
+
+  afterAll(() => {
+    metricsServer?.close();
+  });
+
+  it("401s a wrong token", async () => {
+    const res = await fetch(`${metricsBase}/metrics`, {
+      headers: { authorization: "Bearer nope" },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("serves prometheus text for the right token", async () => {
+    const res = await fetch(`${metricsBase}/metrics`, {
+      headers: { authorization: "Bearer s3cret" },
+    });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("process_cpu_user_seconds_total");
   });

@@ -28,7 +28,7 @@ TypeScript · Node 24 · Express · `supabase-js` · `@privy-io/server-auth` ·
 | ------ | ------------------------------- | ------------- | ---------------------------------------------------- |
 | GET    | `/healthz`                      | none          | Liveness.                                            |
 | GET    | `/readyz`                       | none          | Readiness (pings Supabase; reports auth-bridge state).|
-| GET    | `/metrics`                      | none          | Prometheus metrics.                                  |
+| GET    | `/metrics`                      | `METRICS_TOKEN` | Prometheus metrics. 404 when the token is unset.   |
 | GET    | `/v1/earnings`                  | **anonymous** | Earnings calendar, shaped to the app's `MarketEvent`; metadata carries `iconUrl`/`cardUrl`. `?from= &to= &dex= &limit=`. |
 | GET    | `/v1/earnings/:ticker`          | **anonymous** | One ticker: next event + past results + beat odds, plus name, description and art URLs. |
 | POST   | `/v1/auth/signup`               | Privy bearer  | Sign-up and every-launch bootstrap. Idempotent.      |

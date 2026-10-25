@@ -27,14 +27,15 @@ export const requestLogger: RequestHandler = pinoHttp({
 
 /**
  * Record HTTP request duration into Prometheus, labelled by the matched route
- * (low cardinality) rather than the raw URL.
+ * rather than the raw URL. Unmatched requests share one label: the raw path
+ * would let anyone mint a new series per 404 and grow memory without bound.
  */
 export const metricsTimer: RequestHandler = (req, res, next) => {
   const end = httpRequestDuration.startTimer();
   res.on("finish", () => {
     const route = req.route?.path
       ? `${req.baseUrl ?? ""}${req.route.path}`
-      : req.path;
+      : "unmatched";
     end({
       method: req.method,
       route,
