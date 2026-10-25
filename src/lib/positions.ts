@@ -94,7 +94,7 @@ export async function recordOpen(
   const trade: VerifiedTrade = await verifyTrade(wallet, cloid, "open");
   const db = supabaseAdmin();
 
-  const existing = await findByCloid(cloid);
+  const existing = await findByCloid(userId, cloid);
   if (existing) return { position: existing, created: false };
 
   const context = await openContext(wallet, trade.coin);
@@ -121,7 +121,7 @@ export async function recordOpen(
 
   if (error) {
     if (error.code === UNIQUE_VIOLATION) {
-      const raced = await findByCloid(cloid);
+      const raced = await findByCloid(userId, cloid);
       if (raced) return { position: raced, created: false };
     }
     throw new Error(`position insert failed: ${error.message}`);
@@ -148,7 +148,7 @@ export async function recordClose(
   const trade = await verifyTrade(wallet, cloid, "close");
   const db = supabaseAdmin();
 
-  const alreadyRecorded = await findByCloid(cloid);
+  const alreadyRecorded = await findByCloid(userId, cloid);
   if (alreadyRecorded) return { ok: true, position: alreadyRecorded, created: false };
 
   const { data: open, error: findError } = await db
@@ -186,7 +186,7 @@ export async function recordClose(
 
   if (error) {
     if (error.code === UNIQUE_VIOLATION) {
-      const raced = await findByCloid(cloid);
+      const raced = await findByCloid(userId, cloid);
       if (raced) return { ok: true, position: raced, created: false };
     }
     throw new Error(`position close failed: ${error.message}`);
@@ -200,7 +200,7 @@ export type TakeOutcome =
   | { ok: true; position: PositionRow; kind: "open" | "close" }
   | {
       ok: false;
-      code: "unknown_trade" | "not_yours" | "window_closed" | "already_posted";
+      code: "unknown_trade" | "window_closed" | "already_posted";
       message: string;
     };
 
@@ -215,12 +215,9 @@ export async function postTake(
   cloid: string,
   text: string,
 ): Promise<TakeOutcome> {
-  const position = await findByCloid(cloid);
+  const position = await findByCloid(userId, cloid);
   if (!position) {
     return { ok: false, code: "unknown_trade", message: "no recorded trade with that order id" };
-  }
-  if (position.user_id !== userId) {
-    return { ok: false, code: "not_yours", message: "that trade belongs to another account" };
   }
 
   const kind: "open" | "close" = position.open_cloid === cloid ? "open" : "close";
@@ -269,13 +266,22 @@ export async function postTake(
   return { ok: true, position: data as PositionRow, kind };
 }
 
-async function findByCloid(cloid: string): Promise<PositionRow | null> {
+/**
+ * Scoped to the caller: cloids are public in HL's fills, so an unscoped lookup
+ * would hand back someone else's row. Two `.eq()`s rather than `.or()` so the
+ * cloid is never interpolated into a PostgREST filter string.
+ */
+async function findByCloid(userId: string, cloid: string): Promise<PositionRow | null> {
   const db = supabaseAdmin();
-  const { data, error } = await db
-    .from("positions")
-    .select(POSITION_COLUMNS)
-    .or(`open_cloid.eq.${cloid},close_cloid.eq.${cloid}`)
-    .maybeSingle();
-  if (error) throw new Error(`position lookup failed: ${error.message}`);
-  return (data as PositionRow | null) ?? null;
+  for (const column of ["open_cloid", "close_cloid"] as const) {
+    const { data, error } = await db
+      .from("positions")
+      .select(POSITION_COLUMNS)
+      .eq("user_id", userId)
+      .eq(column, cloid)
+      .maybeSingle();
+    if (error) throw new Error(`position lookup failed: ${error.message}`);
+    if (data) return data as PositionRow;
+  }
+  return null;
 }

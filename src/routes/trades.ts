@@ -19,10 +19,13 @@ export const tradesRouter = Router();
  * it (the `c` field) but `placeOrder` passes nil, so nothing here works yet.
  */
 
-const cloidSchema = z.object({
-  /** The order id the app attached. Format unconstrained — HL echoes it back. */
-  cloid: z.string().trim().min(8).max(80),
-});
+/** HL's client order id: 128 bits as 0x-prefixed hex, which is what the app makes. */
+const cloid = z
+  .string()
+  .trim()
+  .regex(/^0x[0-9a-fA-F]{32}$/, "cloid must be 0x followed by 32 hex characters");
+
+const cloidSchema = z.object({ cloid });
 
 /** What the client needs back to drive the take composer. */
 function tradeView(p: PositionRow, kind: "open" | "close") {
@@ -129,7 +132,7 @@ tradesRouter.post(
 // ── POST /v1/takes ────────────────────────────────────────────────────────────
 
 const takeSchema = z.object({
-  cloid: z.string().trim().min(8).max(80),
+  cloid,
   text: z.string().trim().min(1).max(2_000),
 });
 
@@ -157,7 +160,6 @@ tradesRouter.post(
     const result = await postTake(req.identity!.privyDid, parsed.data.cloid, text);
     if (!result.ok) {
       if (result.code === "unknown_trade") throw new HttpError(404, result.code, result.message);
-      if (result.code === "not_yours") throw new HttpError(403, result.code, result.message);
       throw conflict(result.code, result.message);
     }
     res.status(201).json({ trade: tradeView(result.position, result.kind) });
