@@ -1,6 +1,7 @@
 # Scheduled jobs
 
-The sync jobs run **out of process** from the API server: systemd timers invoke
+The sync jobs run **out of process** from the API server: a scheduler (systemd
+timers on a box, `src/jobs/scheduler.ts` on Heroku) invokes
 `node dist/jobs/run.js <name>`, so job work never touches the API's event loop and
 a crashing job can't take the API down.
 
@@ -117,6 +118,21 @@ overwrites one row.
   so a box that comes back up re-establishes fresh state immediately.
 - The refresh tiers are stateless: on reboot the timers simply resume ticking.
   Nothing to rebuild.
+
+## On Heroku
+
+The `worker` process in the Procfile runs `src/jobs/scheduler.ts`, which mirrors
+the timers below (same names, same UTC times) and spawns each run as its own
+`run.js` process. It skips a tick if that job's previous run is still going and
+kills a run after 10 minutes.
+
+- Scale it to **exactly one** dyno (`heroku ps:scale worker=1`): two would run
+  every job twice and double the liquidation push.
+- Use Basic or above. Eco dynos sleep, and the jobs would silently stop.
+- The daily syncs do **not** run on boot here (unlike `OnBootSec`): Heroku
+  restarts dynos daily and on deploy, and a run per restart would spend the
+  Alpha Vantage quota. Run one by hand with `heroku run npm run job -- <name>`.
+- Changing a cadence means changing both `scheduler.ts` and its timer.
 
 ## Install on the box (as root)
 
