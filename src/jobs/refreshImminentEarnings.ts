@@ -1,30 +1,30 @@
 /**
  * Job: Imminent Earnings Refresh
  *
- * Re-syncs the timing of earnings events that are about to happen — the window
- * where Benzinga sharpens a session slot into a confirmed exact time. Targets
- * ONLY the tickers with an imminent event (not the whole 90-day calendar), so
- * it can run frequently and cheaply. Idempotent: upserts on the fiscal-period
- * key, so re-running just overwrites the one row.
+ * Watches SEC EDGAR for the earnings release of events that are about to
+ * happen, and pins each one to the exact second results were filed (8-K Item
+ * 2.02). Until then an event carries only its pre/post-market slot from the
+ * calendar. Targets ONLY the tickers with an imminent event and costs no Alpha
+ * Vantage calls, so it can run every few minutes.
  *
  * Called by two self-gating tiers (see docs/JOBS.md and src/jobs/run.ts):
- *   - Approaching : fromHours=1,     toHours=24, hourly
- *   - Imminent    : fromHours=-0.25, toHours=1,  every 5 min
- * Both are unconfirmedOnly — a confirmed exact time won't move, so once pinned
- * we stop polling it.
+ *   - Approaching : fromHours=1,  toHours=24, hourly
+ *   - Imminent    : fromHours=-3, toHours=1,  every 5 min
+ * Both are unconfirmedOnly — once a release is stamped it won't move, so we stop
+ * polling it. The imminent tier looks 3h back because a slot's stored time is a
+ * default (16:00 for after-close) and the filing can land well after it.
  *
  * Scheduling: deferred — export the function for the scheduler to call.
  */
 import { supabaseAdmin } from "../lib/supabase.js";
-import { fetchUpcomingEarnings } from "../lib/benzinga.js";
-import { upsertEarningsEvent } from "../lib/earningsEvents.js";
-import { config } from "../config/env.js";
+import { fetchSubmissions, releaseOn } from "../lib/edgar.js";
+import { etDateOf } from "../lib/datetime.js";
 import { logger } from "../lib/logger.js";
 
 export interface RefreshImminentOptions {
   /**
    * Lower bound, hours from now. Negative includes the recent past as grace, so
-   * an event isn't dropped the moment its stored time passes. Default -0.25.
+   * an event isn't dropped the moment its stored time passes. Default -3.
    */
   fromHours?: number;
   /** Upper bound, hours from now. Default 12. */
@@ -49,21 +49,15 @@ interface ImminentRow {
 export async function refreshImminentEarnings(
   opts: RefreshImminentOptions = {},
 ): Promise<void> {
-  const fromHours = opts.fromHours ?? -0.25;
+  const fromHours = opts.fromHours ?? -3;
   const toHours = opts.toHours ?? 12;
   const unconfirmedOnly = opts.unconfirmedOnly ?? true;
   const log = logger.child({ job: "refreshImminentEarnings", fromHours, toHours, unconfirmedOnly });
   log.info("starting");
 
-  if (!config.benzinga.configured) {
-    log.warn("BENZINGA_API_KEY not set — skipping");
-    return;
-  }
-
   const sb = supabaseAdmin();
 
-  // Window is [now + fromHours, now + toHours]. A slightly-negative fromHours
-  // gives grace so an event isn't dropped the moment its stored time passes.
+  // Window is [now + fromHours, now + toHours].
   const lowerBound = new Date(Date.now() + fromHours * 3_600_000).toISOString();
   const upperBound = new Date(Date.now() + toHours * 3_600_000).toISOString();
 
@@ -89,45 +83,45 @@ export async function refreshImminentEarnings(
     log.info("no imminent events — nothing to refresh");
     return;
   }
+  log.info({ events: rows.length }, "imminent events found");
 
-  // Unique tickers → asset id (an event without a joined asset is skipped).
-  const tickerToId: Record<string, string> = {};
+  let released = 0;
   for (const r of rows) {
     const asset = Array.isArray(r.assets) ? r.assets[0] : r.assets;
-    if (asset) tickerToId[asset.ticker] = asset.id;
-  }
-  const tickers = Object.keys(tickerToId);
-  log.info({ events: rows.length, tickers: tickers.length }, "imminent events found");
+    if (!asset) continue;
 
-  // Fetch only these tickers, over just enough days to cover the window.
-  const days = Math.max(1, Math.ceil(toHours / 24) + 1);
-  let earnings;
-  try {
-    earnings = await fetchUpcomingEarnings(tickers, days);
-  } catch (err) {
-    log.error({ err }, "Benzinga fetch failed");
-    return;
-  }
-
-  let refreshed = 0;
-  let changed = 0;
-  for (const e of earnings) {
-    const assetId = tickerToId[e.ticker];
-    if (!assetId) continue;
-
-    const res = await upsertEarningsEvent(sb, assetId, e, { detectChange: true });
-    if (!res.ok) {
-      log.error({ ticker: e.ticker, error: res.error }, "upsert failed");
+    let subs;
+    try {
+      subs = await fetchSubmissions(asset.ticker);
+    } catch (err) {
+      log.error({ ticker: asset.ticker, err }, "EDGAR fetch failed");
       continue;
     }
-    refreshed++;
-    if (res.changed) {
-      changed++;
-      // A change here = the earnings timing just moved/firmed up — the hook a
-      // future push-notification pipeline would listen on.
-      log.info({ ticker: e.ticker }, "earnings timing changed");
+    if (!subs) continue; // not an SEC filer — keeps its session slot
+
+    const at = releaseOn(subs.earningsReleases, etDateOf(r.earnings_at));
+    if (!at) continue;
+
+    const { error: upErr } = await sb
+      .from("earnings_events")
+      .update({
+        earnings_at: at,
+        time_precision: "exact",
+        session: null,
+        is_confirmed: true,
+        source: "edgar",
+        fetched_at: new Date().toISOString(),
+      })
+      .eq("id", r.id);
+
+    if (upErr) {
+      log.error({ ticker: asset.ticker, error: upErr.message }, "update failed");
+      continue;
     }
+    released++;
+    // Results just came out — the hook a push-notification pipeline would listen on.
+    log.info({ ticker: asset.ticker, at }, "earnings released");
   }
 
-  log.info({ refreshed, changed }, "done");
+  log.info({ checked: rows.length, released }, "done");
 }

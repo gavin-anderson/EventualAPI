@@ -13,7 +13,7 @@ export const feedRouter = Router();
  * Reading the position feed — the counterpart to POST /v1/takes.
  *
  * Rooms are keyed on ticker, not on an earnings event. Event ids are derived
- * from a mutable `earnings_at`, so a Benzinga date revision would change the key
+ * from a mutable `earnings_at`, so a calendar date revision would change the key
  * and silently split a room in two. A ticker doesn't get revised.
  */
 

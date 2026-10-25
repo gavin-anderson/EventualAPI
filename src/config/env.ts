@@ -28,8 +28,10 @@ const schema = z.object({
   // Needed only to call Privy's API (getUser -> embedded wallet).
   PRIVY_APP_SECRET: z.string().optional().or(z.literal("")),
 
-  // Benzinga (earnings calendar + EPS data)
-  BENZINGA_API_KEY: z.string().optional().or(z.literal("")),
+  // Alpha Vantage (earnings calendar + EPS history). Free key = 25 requests/day.
+  ALPHAVANTAGE_API_KEY: z.string().optional().or(z.literal("")),
+  // SEC EDGAR asks for a descriptive User-Agent with a contact email.
+  SEC_USER_AGENT: z.string().optional().or(z.literal("")),
 
   // Short on purpose: a take is meant to be contemporaneous with its trade.
   TAKE_WINDOW_SECONDS: z.coerce.number().int().min(30).max(86_400).default(600),
@@ -127,9 +129,13 @@ export const config = {
     configured: supabaseConfigured && privyConfigured,
   },
 
-  benzinga: {
-    configured: nonEmpty(e.BENZINGA_API_KEY),
-    apiKey: e.BENZINGA_API_KEY || "",
+  alphaVantage: {
+    configured: nonEmpty(e.ALPHAVANTAGE_API_KEY),
+    apiKey: e.ALPHAVANTAGE_API_KEY || "",
+  },
+
+  sec: {
+    userAgent: e.SEC_USER_AGENT || "hl-api earnings sync",
   },
 
   takes: {

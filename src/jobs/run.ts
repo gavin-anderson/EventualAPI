@@ -23,7 +23,7 @@ import { backfillEarningsReactions } from "./backfillEarningsReactions.js";
 /** Registry of runnable jobs. The imminent tiers bake in their window defaults. */
 const jobs: Record<string, () => Promise<void>> = {
   "sync-earnings-calendar": syncEarningsCalendar,
-  "sync-earnings-history": syncEarningsHistory,
+  "sync-earnings-history": () => syncEarningsHistory({ tickers: process.argv.slice(3) }),
   "sync-earnings-odds": syncEarningsOdds,
   // Near-event precision tiers. The daily calendar sync covers everything
   // broadly; these ONLY touch soon-and-still-unconfirmed events, so they never
@@ -31,8 +31,9 @@ const jobs: Record<string, () => Promise<void>> = {
   // to a single indexed query when nothing is in its window.
   //   Approaching: events in (1h, 24h] — hourly.
   "refresh-approaching": () => refreshImminentEarnings({ fromHours: 1, toHours: 24 }),
-  //   Imminent: events in [~now, 1h] — every 5 min (escalated cadence).
-  "refresh-imminent": () => refreshImminentEarnings({ fromHours: -0.25, toHours: 1 }),
+  //   Imminent: events in [-3h, 1h] — every 5 min (escalated cadence). Looks back
+  //   because a slot's stored time is a default and the filing can land after it.
+  "refresh-imminent": () => refreshImminentEarnings({ fromHours: -3, toHours: 1 }),
 
   // Liquidation tracking. Split because liquidation prices barely move while
   // marks move constantly: the per-wallet half is slow and budgeted, the

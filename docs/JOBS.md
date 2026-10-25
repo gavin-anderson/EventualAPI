@@ -16,10 +16,10 @@ Jobs (registry in `src/jobs/run.ts`):
 
 | Name | Populates | Cadence |
 |---|---|---|
-| `sync-earnings-calendar` | `earnings_events` (90d) | daily (+ on boot) |
-| `sync-earnings-history` | `earnings_history` | daily (+ on boot) |
-| `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed | hourly |
-| `refresh-imminent` | `earnings_events` in [~now, 1h], unconfirmed | every 5 min |
+| `sync-earnings-calendar` | `earnings_events` (3 months, Alpha Vantage + EDGAR; 1 AV call) | daily (+ on boot) |
+| `sync-earnings-history` | `earnings_history` (≤20 AV calls/run, most-needed tickers first) | daily (+ on boot) |
+| `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed — EDGAR only | hourly |
+| `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly — *optional* |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
 | `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
@@ -96,8 +96,8 @@ drops out once its time is confirmed or has passed.
 
 Each refresh tier first runs an **indexed range query** on
 `earnings_events.earnings_at` that returns *only the events in its window* — a
-handful — then fetches Benzinga for **just those tickers** (batched). So the
-Benzinga cost scales with **# of imminent events, not # of stocks**; the only
+handful — then checks EDGAR for **just those tickers**. So the
+EDGAR cost scales with **# of imminent events, not # of stocks**; the only
 all-rows cost is one index seek per tick. On a day with nothing near, each tier is
 a single query that returns zero rows and exits.
 
