@@ -3,12 +3,12 @@
     "_postman_id": "hl-api-0000-0000-0000-000000000001",
     "name": "hl-api",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Test collection for hl-api.\n\nSet `baseUrl` (default http://localhost:8080).\n\nSCOPE: this API is called by our own mobile app and by our own scheduled jobs. It is not a public API. Every endpoint has one of those two callers; anything without one was deleted.\n\nWORKS WITH NO CREDENTIALS\n- Ops: healthz, readyz, metrics\n- Public reads: earnings calendar + per-ticker earnings detail\n  (these need Supabase creds on the SERVER, not in Postman)\n\nNEEDS A PRIVY ACCESS TOKEN\nEverything else. Paste one into `privyToken`.\n\nPostman CANNOT mint that token: Privy access tokens are ES256 JWTs signed with Privy's private key, issued only through a real sign-in in the SDK. Get one by signing in on the iOS app and reading privy.user.getAccessToken().\n\nTRADES NEED MORE THAN A TOKEN\nThey verify against Hyperliquid by client order id, so they need a real filled order whose cloid you know. A valid token alone returns 409 fill_not_found. The iOS app attaches one to every order it reports."
+    "description": "Test collection for hl-api.\n\nSet `baseUrl` (default http://localhost:8080).\n\nSCOPE: this API is called by our own mobile app and by our own scheduled jobs. It is not a public API. Every endpoint has one of those two callers; anything without one was deleted.\n\nWORKS WITH NO CREDENTIALS\n- Ops: healthz, readyz (metrics needs METRICS_TOKEN)\n- Public reads: earnings calendar + per-ticker earnings detail\n  (these need Supabase creds on the SERVER, not in Postman)\n\nNEEDS A PRIVY ACCESS TOKEN\nEverything else. Paste one into `privyToken`.\n\nPostman CANNOT mint that token: Privy access tokens are ES256 JWTs signed with Privy's private key, issued only through a real sign-in in the SDK. Get one by signing in on the iOS app and reading privy.user.getAccessToken().\n\nTRADES NEED MORE THAN A TOKEN\nThey verify against Hyperliquid by client order id, so they need a real filled order whose cloid you know. A valid token alone returns 409 fill_not_found. The iOS app attaches one to every order it reports."
   },
   "item": [
     {
       "name": "Ops",
-      "description": "Liveness, readiness and metrics. No credentials needed.",
+      "description": "Liveness and readiness need no credentials; metrics needs METRICS_TOKEN.",
       "item": [
         {
           "name": "Health (liveness)",
@@ -48,7 +48,12 @@
           "name": "Metrics (Prometheus)",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{metricsToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/metrics",
               "host": [
@@ -58,7 +63,7 @@
                 "metrics"
               ]
             },
-            "description": "Prometheus exposition format."
+            "description": "Prometheus exposition format. Needs the server's METRICS_TOKEN in `metricsToken`; 404 when the server has none set."
           }
         }
       ]
@@ -750,6 +755,10 @@
     {
       "key": "baseUrl",
       "value": "http://localhost:8080"
+    },
+    {
+      "key": "metricsToken",
+      "value": ""
     },
     {
       "key": "coin",
