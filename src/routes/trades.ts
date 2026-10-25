@@ -62,6 +62,12 @@ function asHttp(err: unknown): never {
   throw err;
 }
 
+/**
+ * Trade routes are limited harder than the rest: each one can make up to five
+ * Hyperliquid /info calls from the dyno's one IP, and if HL 429s us, trade
+ * verification and the position jobs stop working for everyone.
+ */
+
 // ── POST /v1/trades/open ──────────────────────────────────────────────────────
 
 /**
@@ -74,7 +80,7 @@ tradesRouter.post(
   "/trades/open",
   requireAuth,
   requireWallet,
-  rateLimit({ name: "trade-open", max: 60, windowMs: 60_000 }),
+  rateLimit({ name: "trade-open", max: 10, windowMs: 60_000 }),
   asyncHandler(async (req, res) => {
     const parsed = cloidSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -105,7 +111,7 @@ tradesRouter.post(
   "/trades/close",
   requireAuth,
   requireWallet,
-  rateLimit({ name: "trade-close", max: 60, windowMs: 60_000 }),
+  rateLimit({ name: "trade-close", max: 10, windowMs: 60_000 }),
   asyncHandler(async (req, res) => {
     const parsed = cloidSchema.safeParse(req.body);
     if (!parsed.success) {
