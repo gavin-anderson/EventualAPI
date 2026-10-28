@@ -44,8 +44,10 @@ function tradeView(p: PositionRow, kind: "open" | "close") {
       : {}),
     take: {
       kind,
-      // The composer should appear only while this is true.
-      canPost: take === null,
+      // The composer should appear only while this is true. Never for a close:
+      // only opens take a take. The object stays on closes so clients that
+      // decode it keep working, and so a close take from before still shows.
+      canPost: kind === "open" && take === null,
       posted: take,
       maxLength: config.takes.maxLength,
     },
@@ -102,8 +104,8 @@ tradesRouter.post(
 // ── POST /v1/trades/close ─────────────────────────────────────────────────────
 
 /**
- * POST /v1/trades/close — AUTHENTICATED. Stamps the exit and realized PnL, and
- * makes the close takeable: the "here's how that went" post.
+ * POST /v1/trades/close — AUTHENTICATED. Stamps the exit and realized PnL. A
+ * close takes no take (see postTake).
  */
 tradesRouter.post(
   "/trades/close",
@@ -164,6 +166,11 @@ tradesRouter.post(
     const result = await postTake(req.identity!.privyDid, parsed.data.cloid, text);
     if (!result.ok) {
       if (result.code === "unknown_trade") throw new HttpError(404, result.code, result.message);
+      // 400 rather than 409: nothing about the state could change to allow it,
+      // and the app shows a 400's message to the user as-is.
+      if (result.code === "close_takes_removed") {
+        throw new HttpError(400, result.code, result.message);
+      }
       throw conflict(result.code, result.message);
     }
     res.status(201).json({ trade: tradeView(result.position, result.kind) });

@@ -5,7 +5,8 @@ import { supabaseAdmin } from "./supabase.js";
  *
  * Reads `feed_items`, a view that flattens `positions` into posts — a position
  * carrying both an open and a close take appears as two entries, because they
- * are two posts made at different times.
+ * are two posts made at different times. Only opens take takes now (see
+ * postTake), so close entries are the ones posted before that rule.
  */
 
 const COLUMNS =

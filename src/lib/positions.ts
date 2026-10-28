@@ -191,7 +191,7 @@ export type TakeOutcome =
   | { ok: true; position: PositionRow; kind: "open" | "close" }
   | {
       ok: false;
-      code: "unknown_trade" | "already_posted";
+      code: "unknown_trade" | "already_posted" | "close_takes_removed";
       message: string;
     };
 
@@ -199,6 +199,10 @@ export type TakeOutcome =
  * Post a take against a trade, identified by its client order id. The cloid
  * tells us which half this is, so the client can't say the wrong one. There
  * is no deadline: a recorded trade can take its one take at any time.
+ *
+ * Only the OPEN takes one. Closes don't, and neither do liquidations, which
+ * carry no close cloid at all. Close takes posted before that rule stay on
+ * their rows and are still served.
  *
  * The refusals are normal outcomes, not errors.
  */
@@ -213,6 +217,13 @@ export async function postTake(
   }
 
   const kind: "open" | "close" = position.open_cloid === cloid ? "open" : "close";
+  if (kind === "close") {
+    return {
+      ok: false,
+      code: "close_takes_removed",
+      message: "takes are posted when a position opens, not when it closes",
+    };
+  }
   const existingTake = kind === "open" ? position.open_take : position.close_take;
 
   if (existingTake !== null) {

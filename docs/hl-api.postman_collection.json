@@ -375,7 +375,7 @@
                 "close"
               ]
             },
-            "description": "AUTHENTICATED. Stamps exit price and realized PnL onto the open position and opens a second take window.\n\n409 no_open_position when nothing matching is on file - e.g. the position was opened outside the app.",
+            "description": "AUTHENTICATED. Stamps exit price and realized PnL onto the open position. A close takes no take: the response's take has canPost false.\n\n409 no_open_position when nothing matching is on file - e.g. the position was opened outside the app.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cloid\": \"{{cloid}}\"\n}",
@@ -411,7 +411,7 @@
                 "takes"
               ]
             },
-            "description": "AUTHENTICATED. Optional - the trade is recorded either way.\n\nThe cloid says which trade, and therefore whether this is the opening or closing take.\n\nNormal refusals:\n- 409 already_posted  -> one take per trade\n- 403 not_yours / 404 unknown_trade\n\nPosting is the consent moment: the position only becomes publicly readable once it carries a take.",
+            "description": "AUTHENTICATED. Optional - the trade is recorded either way.\n\nOnly an open takes a take. The cloid says which trade.\n\nNormal refusals:\n- 409 already_posted  -> one take per open\n- 400 close_takes_removed -> the cloid is a close; closes (and liquidations) take no take\n- 403 not_yours / 404 unknown_trade\n\nPosting is the consent moment: the position only becomes publicly readable once it carries a take.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cloid\": \"{{cloid}}\",\n  \"text\": \"Guide is what matters here.\"\n}",
@@ -463,7 +463,7 @@
                 }
               ]
             },
-            "description": "AUTHENTICATED. Newest trade first.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nA position with both an open and a close take appears as TWO items — they are two posts made at different times. The close one carries realizedPnl and the exit price."
+            "description": "AUTHENTICATED. Newest trade first.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nA position with both an open and a close take appears as TWO items — they are two posts made at different times. The close one carries realizedPnl and the exit price. Closes no longer take takes, so close items are from before that change."
           }
         },
         {
