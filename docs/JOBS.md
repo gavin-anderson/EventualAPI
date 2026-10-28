@@ -24,7 +24,7 @@ Jobs (registry in `src/jobs/run.ts`):
 | `sync-earnings-calendar` | `earnings_events` (3 months, Alpha Vantage + EDGAR; 1 AV call) | daily (+ on boot) |
 | `sync-earnings-history` | `earnings_history` (≤20 AV calls/run, most-needed tickers first) | daily (+ on boot) |
 | `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed — EDGAR only | hourly |
-| `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only | every 5 min |
+| `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only; then pushes "earnings are out" to every user for each fresh release (claimed once via `released_notified_at`) | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly (systemd timer optional) |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
 | `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |

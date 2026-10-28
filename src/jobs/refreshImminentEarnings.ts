@@ -14,12 +14,18 @@
  * polling it. The imminent tier looks 3h back because a slot's stored time is a
  * default (16:00 for after-close) and the filing can land well after it.
  *
+ * Each run ends by pushing any fresh release to every user (see
+ * src/lib/earningsAlerts.ts) — after the refresh, and on every run rather than
+ * only when this one stamped something, so a release stamped by a run that then
+ * crashed is still announced.
+ *
  * Scheduling: deferred — export the function for the scheduler to call.
  */
 import { supabaseAdmin } from "../lib/supabase.js";
 import { fetchSubmissions, releaseOn } from "../lib/edgar.js";
 import { etDateOf } from "../lib/datetime.js";
 import { logger } from "../lib/logger.js";
+import { notifyReleasedEarnings } from "../lib/earningsAlerts.js";
 
 export interface RefreshImminentOptions {
   /**
@@ -49,6 +55,11 @@ interface ImminentRow {
 export async function refreshImminentEarnings(
   opts: RefreshImminentOptions = {},
 ): Promise<void> {
+  await pinReleases(opts);
+  await notifyReleasedEarnings();
+}
+
+async function pinReleases(opts: RefreshImminentOptions): Promise<void> {
   const fromHours = opts.fromHours ?? -3;
   const toHours = opts.toHours ?? 12;
   const unconfirmedOnly = opts.unconfirmedOnly ?? true;
@@ -119,7 +130,8 @@ export async function refreshImminentEarnings(
       continue;
     }
     released++;
-    // Results just came out — the hook a push-notification pipeline would listen on.
+    // Results just came out. The push goes from notifyReleasedEarnings() once
+    // this loop is done.
     log.info({ ticker: asset.ticker, at }, "earnings released");
   }
 

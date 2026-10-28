@@ -192,6 +192,36 @@ export async function notify(input: NotifyInput): Promise<NotifyOutcome> {
     : { delivered: false, reason: "push_failed", devices: devices.length };
 }
 
+/**
+ * Send many notifications, a few at a time. For fan-outs (one event, many
+ * users): each notify() is several round trips, so strictly one-by-one is slow,
+ * and all-at-once would open hundreds of requests against Supabase and APNs.
+ *
+ * One failure never stops the rest — it is counted and logged.
+ */
+export async function notifyMany(
+  inputs: NotifyInput[],
+  concurrency = 10,
+): Promise<{ delivered: number; failed: number }> {
+  let delivered = 0;
+  let failed = 0;
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (next < inputs.length) {
+      const input = inputs[next++]!;
+      try {
+        if ((await notify(input)).delivered) delivered += 1;
+      } catch (err) {
+        failed += 1;
+        logger.warn({ err, kind: input.kind }, "notify failed");
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, inputs.length) }, worker));
+  return { delivered, failed };
+}
+
 async function insertRow(
   input: NotifyInput,
   pushedAt: string | null,
