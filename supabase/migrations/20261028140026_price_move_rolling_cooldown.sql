@@ -1,6 +1,3 @@
--- NOT YET APPLIED to the live database. When it is, rename this file to the
--- version supabase_migrations.schema_migrations records and delete these lines.
-
 -- Price-move pushes: replace the UTC-day dedupe with a rolling 24-hour cooldown.
 --
 -- Before, (user, coin, day, direction, threshold) was the key, so a move still
