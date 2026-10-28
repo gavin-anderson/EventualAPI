@@ -75,37 +75,22 @@ export async function readFeed(q: FeedQuery): Promise<FeedPage> {
 }
 
 /**
- * Long/short split per ticker, over positions that are *published* — i.e. that
- * carry a take.
- *
- * Counting only published positions keeps it consistent with the feed and with
- * the privacy rule: a position nobody posted about was never revealed, so it
- * can't quietly feed an aggregate either.
- *
- * That makes this sentiment-among-people-who-spoke, not sentiment-among-all-
- * holders. The honest label matters — the latter would need the position mirror.
+ * Long/short split across every position opened through the app on this coin,
+ * open or closed, whether or not anyone posted a take on it. Two head counts,
+ * so no rows come back.
  */
-export async function publishedSentiment(
+export async function positionSentiment(
   coin: string,
 ): Promise<{ long: number; short: number }> {
-  const { data, error } = await supabaseAdmin()
-    .from("feed_items")
-    .select("side, position_id")
-    .eq("coin", coin);
-  if (error) throw new Error(`sentiment read failed: ${error.message}`);
-
-  // De-duplicate by position: one position with two takes is one opinion.
-  const seen = new Map<string, string>();
-  const rows = (data as unknown as Array<{ side: string; position_id: string }>) ?? [];
-  for (const row of rows) {
-    seen.set(row.position_id, row.side);
-  }
-
-  let long = 0;
-  let short = 0;
-  for (const side of seen.values()) {
-    if (side === "long") long += 1;
-    else short += 1;
-  }
+  const count = async (side: "long" | "short") => {
+    const { count, error } = await supabaseAdmin()
+      .from("positions")
+      .select("id", { count: "exact", head: true })
+      .eq("coin", coin)
+      .eq("side", side);
+    if (error) throw new Error(`sentiment read failed: ${error.message}`);
+    return count ?? 0;
+  };
+  const [long, short] = await Promise.all([count("long"), count("short")]);
   return { long, short };
 }

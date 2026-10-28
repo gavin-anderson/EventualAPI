@@ -3,7 +3,7 @@ import { z } from "zod";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import { requireAuth } from "../middleware/auth.js";
 import { badRequest } from "../lib/httpError.js";
-import { readFeed, publishedSentiment, type FeedItemRow } from "../lib/feed.js";
+import { readFeed, positionSentiment, type FeedItemRow } from "../lib/feed.js";
 import { normalizeTicker } from "../lib/watchlist.js";
 import { avatarUrl } from "../lib/avatar.js";
 
@@ -95,10 +95,9 @@ const sentimentSchema = z.object({
 /**
  * GET /v1/feed/sentiment?coin= — AUTHENTICATED. Long/short split for a room.
  *
- * Counts positions that have been *published*, so it is
- * sentiment-among-people-who-posted — not among all holders. Labelled that way
- * on purpose: the broader number would need the server to mirror every user's
- * positions, and this one must not be dressed up as it.
+ * Counts every position opened through the app on this coin (open or closed),
+ * take or no take. Positions opened outside the app aren't on file, so this is
+ * the app's traders, not every holder on Hyperliquid.
  */
 feedRouter.get(
   "/feed/sentiment",
@@ -111,7 +110,7 @@ feedRouter.get(
     const coin = normalizeTicker(parsed.data.coin);
     if (!coin) throw badRequest("invalid coin");
 
-    const { long, short } = await publishedSentiment(coin);
+    const { long, short } = await positionSentiment(coin);
     const total = long + short;
     res.json({
       coin,
@@ -119,7 +118,7 @@ feedRouter.get(
       short,
       total,
       longPct: total > 0 ? Number((long / total).toFixed(4)) : null,
-      basis: "published_positions",
+      basis: "app_positions",
     });
   }),
 );

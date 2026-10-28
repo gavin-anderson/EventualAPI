@@ -493,7 +493,7 @@
                 }
               ]
             },
-            "description": "AUTHENTICATED. Long/short split for a room.\n\nCounts PUBLISHED positions only, so this is sentiment among people who posted — not among all holders. `basis: published_positions` says so in the response. The broader number would need the server to mirror every user's positions.\n\nA position with two takes counts once."
+            "description": "AUTHENTICATED. Long/short split for a room.\n\nCounts every position opened through the app on this coin, open or closed, with or without a take. `basis: app_positions` says so in the response. Positions opened outside the app aren't on file."
           }
         }
       ]
