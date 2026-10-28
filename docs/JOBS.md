@@ -27,7 +27,7 @@ Jobs (registry in `src/jobs/run.ts`):
 | `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only; then pushes "earnings are out" to every user for each fresh release (claimed once via `released_notified_at`) | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly (systemd timer optional) |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
-| `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
+| `evaluate-risk` | logs liquidation proximity (**shadow mode**); then pushes PnL milestones on margin (`position_pnl_alerts`) | every 30s |
 | `detect-liquidations` | `liquidation_events` + a push; closes the `positions` row on a full liquidation | every minute |
 | `backfill-earnings-reactions` | `earnings_history.price_change_24h_pct` for pre-perp dates (Yahoo) | by hand only — see [EARNINGS_DATA.md](EARNINGS_DATA.md) |
 

@@ -30,6 +30,8 @@ export const KINDS = {
   position_closed: { pref: "position_closed", critical: true },
   funds_received: { pref: "funds_received", critical: false },
   referral_earned: { pref: "referral_earned", critical: false },
+  // Good news and bad, but news either way — so quiet hours hold it.
+  position_pnl: { pref: "position_pnl", critical: false },
 } as const;
 
 export type NotificationKind = keyof typeof KINDS;
@@ -61,6 +63,7 @@ interface Prefs {
   position_closed: boolean;
   funds_received: boolean;
   referral_earned: boolean;
+  position_pnl: boolean;
   quiet_hours_start: number | null;
   quiet_hours_end: number | null;
   timezone: string | null;

@@ -1,5 +1,10 @@
 import { supabaseAdmin } from "./supabase.js";
-import { fetchClearinghouseState, fetchMarketQuotes, bareCoin } from "./hyperliquid.js";
+import {
+  fetchClearinghouseState,
+  fetchMarketQuotes,
+  bareCoin,
+  type MarketQuote,
+} from "./hyperliquid.js";
 import { config } from "../config/env.js";
 import { logger } from "./logger.js";
 
@@ -207,6 +212,11 @@ export interface EvaluateResult {
   skippedNoLiqPrice: number;
   skippedNoMark: number;
   readings: RiskReading[];
+  /**
+   * The marks this evaluation used, null when there were no positions to price.
+   * Handed on to the PnL-milestone step so it needs no second HL call.
+   */
+  quotes: Map<string, MarketQuote> | null;
 }
 
 interface MirrorRow {
@@ -236,6 +246,7 @@ export async function evaluateRisk(): Promise<EvaluateResult> {
     skippedNoLiqPrice: 0,
     skippedNoMark: 0,
     readings: [],
+    quotes: null,
   };
 
   const { data, error } = await db
@@ -249,6 +260,7 @@ export async function evaluateRisk(): Promise<EvaluateResult> {
 
   // One call covers every market, so this cost is flat in position count.
   const quotes = await fetchMarketQuotes(config.hyperliquid.dex);
+  result.quotes = quotes;
   const now = Date.now();
 
   for (const r of rows) {
