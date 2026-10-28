@@ -33,7 +33,8 @@ function view(r: FeedItemRow) {
     take: r.take,
     tradedAt: r.traded_at,
     postedAt: r.posted_at,
-    // Only ever set on a close — the "here's how that went" post.
+    editedAt: r.edited_at,
+    // Was only set on close takes, which no longer appear. Kept in the shape.
     realizedPnl: r.realized_pnl,
   };
 }
@@ -49,10 +50,11 @@ const feedSchema = z.object({
  * GET /v1/feed — AUTHENTICATED.
  *
  * `?coin=TSLA` for one ticker's room, `?user=<did>` for one author's history,
- * neither for everything. Newest trade first.
+ * neither for everything. Biggest position first (notional when the take was
+ * posted), then newest take.
  *
- * Only positions carrying a take appear: posting is what publishes a position,
- * and that is enforced in the view, not here.
+ * Only live takes on open positions appear: posting is what publishes a
+ * position, and that is enforced in the view, not here.
  */
 feedRouter.get(
   "/feed",

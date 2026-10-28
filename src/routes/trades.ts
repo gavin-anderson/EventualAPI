@@ -4,7 +4,9 @@ import { asyncHandler } from "../middleware/errorHandler.js";
 import { requireAuth, requireWallet } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import { badRequest, conflict, HttpError } from "../lib/httpError.js";
-import { recordOpen, recordClose, postTake, type PositionRow } from "../lib/positions.js";
+import { recordOpen, recordClose, findByCloid, type PositionRow } from "../lib/positions.js";
+import { postTake, liveTake, type TakeRow } from "../lib/takes.js";
+import { checkTakeText, throwTakeRefusal } from "./takes.js";
 import { TradeVerificationError } from "../lib/tradeVerification.js";
 import { config } from "../config/env.js";
 
@@ -27,9 +29,13 @@ const cloid = z
 
 const cloidSchema = z.object({ cloid });
 
-/** What the client needs back to drive the take composer. */
-function tradeView(p: PositionRow, kind: "open" | "close") {
-  const take = kind === "open" ? p.open_take : p.close_take;
+/**
+ * What the client needs back to drive the take composer. `live` is the user's
+ * live take on the position, for an open. A close never takes one; its `take`
+ * stays in the response so app builds that decode it keep working.
+ */
+function tradeView(p: PositionRow, kind: "open" | "close", live: TakeRow | null = null) {
+  const take = kind === "open" ? (live?.text ?? null) : p.close_take;
   return {
     positionId: p.id,
     coin: p.coin,
@@ -44,8 +50,8 @@ function tradeView(p: PositionRow, kind: "open" | "close") {
       : {}),
     take: {
       kind,
-      // The composer should appear only while this is true.
-      canPost: take === null,
+      // The composer should appear only while this is true. Never for a close.
+      canPost: kind === "open" && take === null,
       posted: take,
       maxLength: config.takes.maxLength,
     },
@@ -92,7 +98,10 @@ tradesRouter.post(
         identity.wallet!,
         parsed.data.cloid,
       );
-      res.status(created ? 201 : 200).json({ created, trade: tradeView(position, "open") });
+      const live = await liveTake(identity.privyDid, position.coin);
+      res
+        .status(created ? 201 : 200)
+        .json({ created, trade: tradeView(position, "open", live) });
     } catch (err) {
       asHttp(err);
     }
@@ -102,8 +111,8 @@ tradesRouter.post(
 // ── POST /v1/trades/close ─────────────────────────────────────────────────────
 
 /**
- * POST /v1/trades/close — AUTHENTICATED. Stamps the exit and realized PnL, and
- * makes the close takeable: the "here's how that went" post.
+ * POST /v1/trades/close — AUTHENTICATED. Stamps the exit and realized PnL. A
+ * close takes no take (see postTake).
  */
 tradesRouter.post(
   "/trades/close",
@@ -141,31 +150,38 @@ const takeSchema = z.object({
 });
 
 /**
- * POST /v1/takes — AUTHENTICATED. Separate because posting is optional.
- *
- * Posting is the consent moment for publishing a position: a row is only
- * publicly readable once it carries a take, enforced in RLS.
+ * POST /v1/takes — AUTHENTICATED. The original way to post: by the cloid of
+ * the trade. Kept for app builds that still use it, and now just a door to
+ * POST /v1/takes/:coin — the take goes on the open position the trade is part
+ * of, under the same rules. A close's cloid is refused.
  */
 tradesRouter.post(
   "/takes",
   requireAuth,
+  requireWallet,
   rateLimit({ name: "take-post", max: 30, windowMs: 60_000 }),
   asyncHandler(async (req, res) => {
     const parsed = takeSchema.safeParse(req.body);
     if (!parsed.success) {
       throw badRequest(parsed.error.issues.map((i) => i.message).join("; "));
     }
-    // Configurable, so enforced here rather than in the zod schema.
-    const text = parsed.data.text;
-    if (text.length > config.takes.maxLength) {
-      throw badRequest(`a take may be at most ${config.takes.maxLength} characters`);
+    const text = checkTakeText(parsed.data.text);
+    const identity = req.identity!;
+
+    const position = await findByCloid(identity.privyDid, parsed.data.cloid);
+    if (!position) throw new HttpError(404, "unknown_trade", "no recorded trade with that order id");
+    if (position.open_cloid !== parsed.data.cloid) {
+      // 400 rather than 409: nothing about the state could change to allow it,
+      // and the app shows a 400's message to the user as-is.
+      throw new HttpError(
+        400,
+        "close_takes_removed",
+        "takes are posted on open positions, not on closes",
+      );
     }
 
-    const result = await postTake(req.identity!.privyDid, parsed.data.cloid, text);
-    if (!result.ok) {
-      if (result.code === "unknown_trade") throw new HttpError(404, result.code, result.message);
-      throw conflict(result.code, result.message);
-    }
-    res.status(201).json({ trade: tradeView(result.position, result.kind) });
+    const result = await postTake(identity.privyDid, identity.wallet!, position.coin, text);
+    if (!result.ok) throwTakeRefusal(result);
+    res.status(201).json({ trade: tradeView(position, "open", result.take) });
   }),
 );

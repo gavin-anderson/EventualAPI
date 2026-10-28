@@ -1,20 +1,21 @@
 import { supabaseAdmin } from "./supabase.js";
 
 /**
- * The position feed: takes, newest trade first.
+ * The position feed: takes, biggest position first.
  *
- * Reads `feed_items`, a view that flattens `positions` into posts — a position
- * carrying both an open and a close take appears as two entries, because they
- * are two posts made at different times.
+ * Reads `feed_items`, a view over `takes`: one entry per LIVE take on an open
+ * position. A take is removed when its position closes or changes (see
+ * src/lib/takes.ts), and removed or hidden takes never appear. `kind` is
+ * always "open" now; it stays in the shape for clients that read it.
  */
 
 const COLUMNS =
   "id, position_id, kind, user_id, username, image_ref, coin, side, size, " +
-  "notional, leverage, price, take, traded_at, posted_at, realized_pnl, is_closed";
+  "notional, leverage, price, take, traded_at, posted_at, realized_pnl, is_closed, edited_at";
 
 export interface FeedItemRow {
   id: string;
-  position_id: string;
+  position_id: string | null;
   kind: "open" | "close";
   user_id: string;
   username: string | null;
@@ -30,6 +31,7 @@ export interface FeedItemRow {
   posted_at: string | null;
   realized_pnl: number | null;
   is_closed: boolean;
+  edited_at: string | null;
 }
 
 export interface FeedQuery {
@@ -52,15 +54,18 @@ export interface FeedPage {
  * Offset pagination rather than a keyset cursor. Volume here is bounded by real
  * trades — a room can't reach 2,000 posts unless 2,000 positions were opened in
  * that ticker — so offsets never go deep enough for the usual drift to matter.
- * If a room ever does get big, the upgrade is a keyset on (traded_at, id).
+ * If a room ever does get big, the upgrade is a keyset on (notional, posted_at,
+ * id).
  */
 export async function readFeed(q: FeedQuery): Promise<FeedPage> {
   let query = supabaseAdmin()
     .from("feed_items")
     .select(COLUMNS, { count: "exact" })
-    // Ordered by the trade, not the post. id breaks ties so a page boundary is
-    // stable when two trades share a timestamp.
-    .order("traded_at", { ascending: false })
+    // Biggest position first: notional is the take's snapshot, size x entry
+    // when it was posted, so the order doesn't shift with the price. Newest
+    // take then id break ties, so a page boundary is stable.
+    .order("notional", { ascending: false })
+    .order("posted_at", { ascending: false })
     .order("id", { ascending: false })
     .range(q.offset, q.offset + q.limit - 1);
 

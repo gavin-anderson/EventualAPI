@@ -53,6 +53,7 @@ uuid and ours is text, so it would be null. Kept correct even though unused.
 | `username_claims` | all | — | service role |
 | `positions` | rows **with a take**, non-hidden, public columns | — | service role |
 | `watchlist` | — | own rows | service role |
+| `takes` | — | — | service role (live ones are public via `feed_items`) |
 | `feed_items` (view) | — | — | read-only, service role |
 | `tracked_wallets` | — | — | internal, service role only |
 | `wallet_open_positions` | — | — | internal, service role only |
@@ -97,8 +98,9 @@ of consenting to reveal side and size.
 **`watchlist`** is owner-only. Weaker signal than a position, but still interest
 the user never published — same rule.
 
-`feed_items` is a view over `positions` joined to `profiles`, flattening each
-position's open and close takes into separate posts. Declared
+`feed_items` is a view over `takes` joined to `profiles`: one post per live,
+unhidden take on an open position. Removed takes (position closed or changed)
+and the old close takes stay in their tables but never reach it. Declared
 `security_invoker = true`, so the underlying policies still apply if a client
 ever reads it directly — and revoked from `anon`/`authenticated` regardless,
 since a view hands over exactly the columns it selects.

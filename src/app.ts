@@ -6,6 +6,7 @@ import { metricsRouter } from "./routes/metrics.js";
 import { earningsRouter } from "./routes/earnings.js";
 import { profileRouter } from "./routes/profile.js";
 import { tradesRouter } from "./routes/trades.js";
+import { takesRouter } from "./routes/takes.js";
 import { feedRouter } from "./routes/feed.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { watchlistRouter } from "./routes/watchlist.js";
@@ -30,7 +31,8 @@ export function createApp(): Express {
   // Public + authenticated API, versioned under /v1.
   app.use("/v1/earnings", earningsRouter); // anonymous (upcoming earnings calendar)
   app.use("/v1", profileRouter);           // signup + profile + usernames
-  app.use("/v1", tradesRouter);            // trade notifications + takes
+  app.use("/v1", tradesRouter);            // trade notifications (+ the cloid take door)
+  app.use("/v1", takesRouter);             // takes on open positions
   app.use("/v1", feedRouter);              // reading the position feed
   app.use("/v1", notificationsRouter);     // devices, inbox, push preferences
   app.use("/v1", watchlistRouter);         // starred tickers

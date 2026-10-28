@@ -3,6 +3,7 @@ import { fetchClearinghouseState } from "./hyperliquid.js";
 import { verifyTrade, type VerifiedTrade } from "./tradeVerification.js";
 import { config } from "../config/env.js";
 import { logger } from "./logger.js";
+import { removeLiveTake } from "./takes.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -118,6 +119,9 @@ export async function recordOpen(
     }
     throw new Error(`position insert failed: ${error.message}`);
   }
+  // A live take on this coin was about the position before this order: an add
+  // has changed it (and a fresh open means the old one went unnoticed).
+  await removeLiveTake(userId, trade.coin, "changed", trade.tradedAt);
   return { position: data as PositionRow, created: true };
 }
 
@@ -182,72 +186,8 @@ export async function recordClose(
     }
     throw new Error(`position close failed: ${error.message}`);
   }
+  await removeLiveTake(userId, trade.coin, "closed", trade.tradedAt);
   return { ok: true, position: data as PositionRow, created: true };
-}
-
-// ── Takes ─────────────────────────────────────────────────────────────────────
-
-export type TakeOutcome =
-  | { ok: true; position: PositionRow; kind: "open" | "close" }
-  | {
-      ok: false;
-      code: "unknown_trade" | "already_posted";
-      message: string;
-    };
-
-/**
- * Post a take against a trade, identified by its client order id. The cloid
- * tells us which half this is, so the client can't say the wrong one. There
- * is no deadline: a recorded trade can take its one take at any time.
- *
- * The refusals are normal outcomes, not errors.
- */
-export async function postTake(
-  userId: string,
-  cloid: string,
-  text: string,
-): Promise<TakeOutcome> {
-  const position = await findByCloid(userId, cloid);
-  if (!position) {
-    return { ok: false, code: "unknown_trade", message: "no recorded trade with that order id" };
-  }
-
-  const kind: "open" | "close" = position.open_cloid === cloid ? "open" : "close";
-  const existingTake = kind === "open" ? position.open_take : position.close_take;
-
-  if (existingTake !== null) {
-    return {
-      ok: false,
-      code: "already_posted",
-      message: "a take has already been posted for that trade",
-    };
-  }
-
-  const now = new Date().toISOString();
-  const patch =
-    kind === "open"
-      ? { open_take: text, open_take_at: now }
-      : { close_take: text, close_take_at: now };
-
-  const db = supabaseAdmin();
-  const { data, error } = await db
-    .from("positions")
-    .update(patch)
-    .eq("id", position.id)
-    // Re-checked in WHERE so two concurrent posts can't both win.
-    .is(kind === "open" ? "open_take" : "close_take", null)
-    .select(POSITION_COLUMNS)
-    .maybeSingle();
-
-  if (error) throw new Error(`take post failed: ${error.message}`);
-  if (!data) {
-    return {
-      ok: false,
-      code: "already_posted",
-      message: "a take has already been posted for that trade",
-    };
-  }
-  return { ok: true, position: data as PositionRow, kind };
 }
 
 /**
@@ -255,7 +195,7 @@ export async function postTake(
  * would hand back someone else's row. Two `.eq()`s rather than `.or()` so the
  * cloid is never interpolated into a PostgREST filter string.
  */
-async function findByCloid(userId: string, cloid: string): Promise<PositionRow | null> {
+export async function findByCloid(userId: string, cloid: string): Promise<PositionRow | null> {
   const db = supabaseAdmin();
   for (const column of ["open_cloid", "close_cloid"] as const) {
     const { data, error } = await db
