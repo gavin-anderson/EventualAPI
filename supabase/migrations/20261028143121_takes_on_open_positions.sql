@@ -1,8 +1,3 @@
--- NOT YET APPLIED to the live database. When it is, rename this file to the
--- version supabase_migrations.schema_migrations records and delete these lines.
--- Apply it together with the hl-api deploy that reads `takes`: the old code
--- writes takes onto positions.open_take, which this view no longer reads.
-
 -- Takes become comments on OPEN positions.
 --
 --   * One live take per user per coin: a position on Hyperliquid is one per
