@@ -34,7 +34,6 @@ const schema = z.object({
   SEC_USER_AGENT: z.string().optional().or(z.literal("")),
 
   // Short on purpose: a take is meant to be contemporaneous with its trade.
-  TAKE_WINDOW_SECONDS: z.coerce.number().int().min(30).max(86_400).default(600),
   TAKE_MAX_LENGTH: z.coerce.number().int().min(50).max(2_000).default(500),
 
   // APNs. Dormant until all three secrets are set; the service runs fine
@@ -142,7 +141,6 @@ export const config = {
   },
 
   takes: {
-    windowSeconds: e.TAKE_WINDOW_SECONDS,
     maxLength: e.TAKE_MAX_LENGTH,
   },
 

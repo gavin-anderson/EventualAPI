@@ -411,7 +411,7 @@
                 "takes"
               ]
             },
-            "description": "AUTHENTICATED. Optional - the trade is recorded either way.\n\nThe cloid says which trade, and therefore whether this is the opening or closing take.\n\nNormal refusals:\n- 409 window_closed   -> past TAKE_WINDOW_SECONDS (default 600s from the FILL time)\n- 409 already_posted  -> one take per trade\n- 403 not_yours / 404 unknown_trade\n\nPosting is the consent moment: the position only becomes publicly readable once it carries a take.",
+            "description": "AUTHENTICATED. Optional - the trade is recorded either way.\n\nThe cloid says which trade, and therefore whether this is the opening or closing take.\n\nNormal refusals:\n- 409 already_posted  -> one take per trade\n- 403 not_yours / 404 unknown_trade\n\nPosting is the consent moment: the position only becomes publicly readable once it carries a take.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cloid\": \"{{cloid}}\",\n  \"text\": \"Guide is what matters here.\"\n}",
