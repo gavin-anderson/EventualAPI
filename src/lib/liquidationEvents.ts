@@ -251,7 +251,7 @@ export interface ClosePatch {
  * loss and fees are split by size so the feed doesn't count them twice.
  *
  * There is no `close_cloid` (HL placed these orders, not the app) and so no
- * close take window: nobody posts a take on being liquidated.
+ * close take: nobody posts a take on being liquidated.
  */
 export function planLiquidationCloses(rows: OpenRow[], e: Grouped): ClosePatch[] {
   const total = rows.reduce((sum, r) => sum + (Number(r.size) || 0), 0);

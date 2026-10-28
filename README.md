@@ -147,7 +147,7 @@ stays dormant until its block is filled in.
 | `SEC_USER_AGENT` | EDGAR lookups. SEC asks for a descriptive value with a contact email. |
 | `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID` (+ `APNS_BUNDLE_ID`) | Push delivery. Without them notifications still land in the inbox. |
 | `HL_DEX` | The HIP-3 dex the app trades (default `xyz`). |
-| `TAKE_WINDOW_SECONDS`, `TAKE_MAX_LENGTH` | Take rules (defaults 600s, 500 chars). |
+| `TAKE_MAX_LENGTH` | Longest take allowed (default 500 chars). |
 
 No JWT secret: the app never talks to Supabase directly, so no session is
 minted — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
