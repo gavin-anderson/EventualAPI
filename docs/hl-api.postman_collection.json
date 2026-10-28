@@ -565,7 +565,7 @@
                 }
               ]
             },
-            "description": "AUTHENTICATED. Newest trade first.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nOne item per LIVE take on an open position: a take is removed when its position closes or changes, and removed takes don't appear. editedAt is set when the take was edited. kind is always open and realizedPnl null; both stay for older clients."
+            "description": "AUTHENTICATED. Biggest position first: notional (size x entry when the take was posted), then newest take.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nOne item per LIVE take on an open position: a take is removed when its position closes or changes, and removed takes don't appear. editedAt is set when the take was edited. kind is always open and realizedPnl null; both stay for older clients."
           }
         },
         {

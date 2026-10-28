@@ -50,7 +50,8 @@ const feedSchema = z.object({
  * GET /v1/feed — AUTHENTICATED.
  *
  * `?coin=TSLA` for one ticker's room, `?user=<did>` for one author's history,
- * neither for everything. Newest trade first.
+ * neither for everything. Biggest position first (notional when the take was
+ * posted), then newest take.
  *
  * Only live takes on open positions appear: posting is what publishes a
  * position, and that is enforced in the view, not here.

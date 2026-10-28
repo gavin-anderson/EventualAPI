@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "./supabase.js";
 
 /**
- * The position feed: takes, newest trade first.
+ * The position feed: takes, biggest position first.
  *
  * Reads `feed_items`, a view over `takes`: one entry per LIVE take on an open
  * position. A take is removed when its position closes or changes (see
@@ -54,15 +54,18 @@ export interface FeedPage {
  * Offset pagination rather than a keyset cursor. Volume here is bounded by real
  * trades — a room can't reach 2,000 posts unless 2,000 positions were opened in
  * that ticker — so offsets never go deep enough for the usual drift to matter.
- * If a room ever does get big, the upgrade is a keyset on (traded_at, id).
+ * If a room ever does get big, the upgrade is a keyset on (notional, posted_at,
+ * id).
  */
 export async function readFeed(q: FeedQuery): Promise<FeedPage> {
   let query = supabaseAdmin()
     .from("feed_items")
     .select(COLUMNS, { count: "exact" })
-    // Ordered by the trade, not the post. id breaks ties so a page boundary is
-    // stable when two trades share a timestamp.
-    .order("traded_at", { ascending: false })
+    // Biggest position first: notional is the take's snapshot, size x entry
+    // when it was posted, so the order doesn't shift with the price. Newest
+    // take then id break ties, so a page boundary is stable.
+    .order("notional", { ascending: false })
+    .order("posted_at", { ascending: false })
     .order("id", { ascending: false })
     .range(q.offset, q.offset + q.limit - 1);
 
