@@ -29,7 +29,6 @@ const cloidSchema = z.object({ cloid });
 
 /** What the client needs back to drive the take composer. */
 function tradeView(p: PositionRow, kind: "open" | "close") {
-  const until = kind === "open" ? p.open_take_until : p.close_take_until;
   const take = kind === "open" ? p.open_take : p.close_take;
   return {
     positionId: p.id,
@@ -46,9 +45,8 @@ function tradeView(p: PositionRow, kind: "open" | "close") {
     take: {
       kind,
       // The composer should appear only while this is true.
-      canPost: take === null && !!until && Date.parse(until) > Date.now(),
+      canPost: take === null,
       posted: take,
-      windowClosesAt: until,
       maxLength: config.takes.maxLength,
     },
   };
@@ -105,7 +103,7 @@ tradesRouter.post(
 
 /**
  * POST /v1/trades/close — AUTHENTICATED. Stamps the exit and realized PnL, and
- * opens a second take window: the "here's how that went" post.
+ * makes the close takeable: the "here's how that went" post.
  */
 tradesRouter.post(
   "/trades/close",

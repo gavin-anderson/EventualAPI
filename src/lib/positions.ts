@@ -12,8 +12,8 @@ const POSITION_COLUMNS = `
   entry_px, size, notional, fee_paid, opened_at, open_cloid,
   leverage, liquidation_px, margin_used,
   closed_at, exit_px, realized_pnl, close_fee_paid, close_cloid,
-  open_take, open_take_at, open_take_until,
-  close_take, close_take_at, close_take_until,
+  open_take, open_take_at,
+  close_take, close_take_at,
   hidden_at, created_at`;
 
 export interface PositionRow {
@@ -37,10 +37,8 @@ export interface PositionRow {
   close_cloid: string | null;
   open_take: string | null;
   open_take_at: string | null;
-  open_take_until: string | null;
   close_take: string | null;
   close_take_at: string | null;
-  close_take_until: string | null;
   hidden_at: string | null;
   created_at: string;
 }
@@ -49,10 +47,6 @@ export interface RecordResult {
   position: PositionRow;
   /** False when this call was a replay of one already recorded. */
   created: boolean;
-}
-
-function windowEnd(from: Date): string {
-  return new Date(from.getTime() + config.takes.windowSeconds * 1000).toISOString();
 }
 
 /**
@@ -112,8 +106,6 @@ export async function recordOpen(
       fee_paid: trade.feePaid,
       opened_at: trade.tradedAt.toISOString(),
       open_cloid: cloid,
-      // Window starts at the FILL, not this request, or a slow hook extends it.
-      open_take_until: windowEnd(trade.tradedAt),
       ...context,
     })
     .select(POSITION_COLUMNS)
@@ -178,7 +170,6 @@ export async function recordClose(
       realized_pnl: trade.realizedPnl,
       close_fee_paid: trade.feePaid,
       close_cloid: cloid,
-      close_take_until: windowEnd(trade.tradedAt),
     })
     .eq("id", (open as PositionRow).id)
     .select(POSITION_COLUMNS)
@@ -200,13 +191,14 @@ export type TakeOutcome =
   | { ok: true; position: PositionRow; kind: "open" | "close" }
   | {
       ok: false;
-      code: "unknown_trade" | "window_closed" | "already_posted";
+      code: "unknown_trade" | "already_posted";
       message: string;
     };
 
 /**
  * Post a take against a trade, identified by its client order id. The cloid
- * tells us which half this is, so the client can't say the wrong one.
+ * tells us which half this is, so the client can't say the wrong one. There
+ * is no deadline: a recorded trade can take its one take at any time.
  *
  * The refusals are normal outcomes, not errors.
  */
@@ -222,20 +214,12 @@ export async function postTake(
 
   const kind: "open" | "close" = position.open_cloid === cloid ? "open" : "close";
   const existingTake = kind === "open" ? position.open_take : position.close_take;
-  const until = kind === "open" ? position.open_take_until : position.close_take_until;
 
   if (existingTake !== null) {
     return {
       ok: false,
       code: "already_posted",
       message: "a take has already been posted for that trade",
-    };
-  }
-  if (!until || Date.parse(until) < Date.now()) {
-    return {
-      ok: false,
-      code: "window_closed",
-      message: "the window for posting about that trade has closed",
     };
   }
 
