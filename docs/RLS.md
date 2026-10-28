@@ -61,6 +61,7 @@ uuid and ours is text, so it would be null. Kept correct even though unused.
 | `notifications` | — | — | internal, service role only |
 | `liquidation_events` | — | — | internal, service role only |
 | `position_pnl_alerts` | — | — | internal, service role only |
+| `price_move_alerts` | — | — | internal, service role only |
 | `assets`, `earnings_*` | all | — | service role |
 | `asset-logos` (Storage) | **public bucket** | — | service role |
 | `avatars` (Storage) | **public bucket** | — | service role |

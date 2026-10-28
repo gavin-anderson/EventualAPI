@@ -1,0 +1,13 @@
+[Unit]
+Description=hl-api: push 10%/20% 24h price moves to watchers
+
+[Timer]
+# One Hyperliquid call for every market, so this costs the same at any scale.
+# Every 2 minutes: a big move is news for longer than that, and the per-day
+# dedupe means a faster cadence would only find the same moves sooner.
+OnCalendar=*-*-* *:00/2:00
+Persistent=false
+Unit=hl-api-job@detect-price-moves.service
+
+[Install]
+WantedBy=timers.target
