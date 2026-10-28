@@ -7,6 +7,7 @@ import {
 } from "./hyperliquid.js";
 import { config } from "../config/env.js";
 import { logger } from "./logger.js";
+import { reconcileWalletTakes } from "./takes.js";
 
 /**
  * Liquidation tracking.
@@ -132,7 +133,7 @@ async function refreshWallet(wallet: string): Promise<number> {
       return {
         wallet_address: wallet,
         coin: bareCoin(p.coin),
-        side: szi > 0 ? "long" : "short",
+        side: szi > 0 ? ("long" as const) : ("short" as const),
         size: Math.abs(szi),
         entry_px: p.entryPx ? Number(p.entryPx) : 0,
         liquidation_px: p.liquidationPx ? Number(p.liquidationPx) : null,
@@ -160,6 +161,14 @@ async function refreshWallet(wallet: string): Promise<number> {
   if (keep.length > 0) prune = prune.not("coin", "in", `(${keep.join(",")})`);
   const { error: pruneError } = await prune;
   if (pruneError) throw new Error(`mirror prune failed: ${pruneError.message}`);
+
+  // Takes on positions that have since closed or changed come down here: the
+  // one check that sees changes made outside the app. Never fails the refresh.
+  try {
+    await reconcileWalletTakes(wallet, rows);
+  } catch (err) {
+    logger.warn({ err, wallet }, "take reconcile failed");
+  }
 
   const { error: schedError } = await db
     .from("tracked_wallets")

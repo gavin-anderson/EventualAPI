@@ -375,7 +375,7 @@
                 "close"
               ]
             },
-            "description": "AUTHENTICATED. Stamps exit price and realized PnL onto the open position. A close takes no take: the response's take has canPost false.\n\n409 no_open_position when nothing matching is on file - e.g. the position was opened outside the app.",
+            "description": "AUTHENTICATED. Stamps exit price and realized PnL onto the open position, and removes the user's take on it. A close takes no take: the response's take has canPost false.\n\n409 no_open_position when nothing matching is on file - e.g. the position was opened outside the app.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cloid\": \"{{cloid}}\"\n}",
@@ -388,7 +388,7 @@
           }
         },
         {
-          "name": "Post a take",
+          "name": "Post a take (older builds, by cloid)",
           "request": {
             "method": "POST",
             "header": [
@@ -411,10 +411,112 @@
                 "takes"
               ]
             },
-            "description": "AUTHENTICATED. Optional - the trade is recorded either way.\n\nOnly an open takes a take. The cloid says which trade.\n\nNormal refusals:\n- 409 already_posted  -> one take per open\n- 400 close_takes_removed -> the cloid is a close; closes (and liquidations) take no take\n- 403 not_yours / 404 unknown_trade\n\nPosting is the consent moment: the position only becomes publicly readable once it carries a take.",
+            "description": "AUTHENTICATED. The original way to post, kept for older app builds: by the cloid of the OPEN trade. The take goes on the open position that trade is part of, under the same rules as POST /v1/takes/:coin.\n\nRefusals:\n- 404 unknown_trade\n- 400 close_takes_removed -> the cloid is a close\n- 409 no_open_position / already_posted -> as for POST /v1/takes/:coin",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cloid\": \"{{cloid}}\",\n  \"text\": \"Guide is what matters here.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "My live takes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/takes/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "takes",
+                "mine"
+              ]
+            },
+            "description": "AUTHENTICATED. The caller's live takes, at most one per coin. Each carries the position as it was when posted (side, size, entryPx, leverage) and editedAt."
+          }
+        },
+        {
+          "name": "Post a take on an open position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/takes/{{ticker}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "takes",
+                "{{ticker}}"
+              ]
+            },
+            "description": "AUTHENTICATED. One take per open position, any time while it is open. The position is checked live on Hyperliquid, so one opened outside the app counts too.\n\nThe take is removed (hidden, kept for moderation) when the position closes or its size or side changes; the changed position can then take a new one.\n\nRefusals:\n- 409 no_open_position -> no open position in that coin\n- 409 already_posted -> it has one; PATCH to edit\n- 400 -> empty or over TAKE_MAX_LENGTH",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Guide is what matters here.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Edit my take",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{privyToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/takes/{{ticker}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "takes",
+                "{{ticker}}"
+              ]
+            },
+            "description": "AUTHENTICATED. Replace the text of your live take on that coin. Same take; editedAt is stamped.\n\nRefusals:\n- 404 no_live_take\n- 409 position_changed -> the position closed or changed since posting, so the take was just removed; post a new one\n- 400 -> empty or over TAKE_MAX_LENGTH",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Guide is what matters here. Edited: margins too.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -463,7 +565,7 @@
                 }
               ]
             },
-            "description": "AUTHENTICATED. Newest trade first.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nA position with both an open and a close take appears as TWO items — they are two posts made at different times. The close one carries realizedPnl and the exit price. Closes no longer take takes, so close items are from before that change."
+            "description": "AUTHENTICATED. Newest trade first.\n\n`?coin=TSLA` for one room, `?user=<did>` for one author's history, neither for everything.\n\nOne item per LIVE take on an open position: a take is removed when its position closes or changes, and removed takes don't appear. editedAt is set when the take was edited. kind is always open and realizedPnl null; both stay for older clients."
           }
         },
         {

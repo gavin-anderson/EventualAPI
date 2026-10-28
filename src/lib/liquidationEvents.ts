@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabase.js";
 import { fetchUserFills, bareCoin, type HlFill } from "./hyperliquid.js";
 import { notify } from "./notify.js";
 import { logger } from "./logger.js";
+import { removeLiveTake } from "./takes.js";
 
 /**
  * Detecting liquidations, and telling the user once.
@@ -156,6 +157,9 @@ export async function detectLiquidations(budget = 100): Promise<DetectResult> {
         // idempotent, and a failure here then retries on the overlap re-scan
         // instead of being hidden behind the already-recorded event row.
         result.positionsClosed += await closeLiquidatedPositions(w.user_id, e);
+        // The take was about the position before this. A partial liquidation
+        // changed it; a full one ended it. Takes posted after are left alone.
+        await removeLiveTake(w.user_id, e.coin, e.remaining > 0 ? "changed" : "liquidated", e.liquidatedAt);
       }
 
       await db
@@ -250,8 +254,8 @@ export interface ClosePatch {
  * extra open row; all of them were the one HL position, so all close, and the
  * loss and fees are split by size so the feed doesn't count them twice.
  *
- * There is no `close_cloid` (HL placed these orders, not the app) and so no
- * close take: nobody posts a take on being liquidated.
+ * There is no `close_cloid` (HL placed these orders, not the app). The user's
+ * take on the position is removed separately (see removeLiveTake).
  */
 export function planLiquidationCloses(rows: OpenRow[], e: Grouped): ClosePatch[] {
   const total = rows.reduce((sum, r) => sum + (Number(r.size) || 0), 0);

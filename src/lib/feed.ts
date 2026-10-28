@@ -3,19 +3,19 @@ import { supabaseAdmin } from "./supabase.js";
 /**
  * The position feed: takes, newest trade first.
  *
- * Reads `feed_items`, a view that flattens `positions` into posts — a position
- * carrying both an open and a close take appears as two entries, because they
- * are two posts made at different times. Only opens take takes now (see
- * postTake), so close entries are the ones posted before that rule.
+ * Reads `feed_items`, a view over `takes`: one entry per LIVE take on an open
+ * position. A take is removed when its position closes or changes (see
+ * src/lib/takes.ts), and removed or hidden takes never appear. `kind` is
+ * always "open" now; it stays in the shape for clients that read it.
  */
 
 const COLUMNS =
   "id, position_id, kind, user_id, username, image_ref, coin, side, size, " +
-  "notional, leverage, price, take, traded_at, posted_at, realized_pnl, is_closed";
+  "notional, leverage, price, take, traded_at, posted_at, realized_pnl, is_closed, edited_at";
 
 export interface FeedItemRow {
   id: string;
-  position_id: string;
+  position_id: string | null;
   kind: "open" | "close";
   user_id: string;
   username: string | null;
@@ -31,6 +31,7 @@ export interface FeedItemRow {
   posted_at: string | null;
   realized_pnl: number | null;
   is_closed: boolean;
+  edited_at: string | null;
 }
 
 export interface FeedQuery {
