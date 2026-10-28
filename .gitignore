@@ -28,9 +28,10 @@ tmp-*.ts
 skills-lock.json
 .mcp.json
 
-# Supabase CLI project — DB is managed via the MCP/dashboard, not the CLI.
-# config.toml holds the project ref/URLs; migrations are applied to the live DB.
-supabase/
+# Supabase: migrations are tracked (they are the record of a schema managed
+# through the MCP/dashboard); the CLI's local working state is not.
+supabase/.temp/
+supabase/.branches/
 
 # Postman VS Code extension working state. It mirrors
 # docs/hl-api.postman_collection.json into a cloud-synced directory copy, so
