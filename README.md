@@ -154,9 +154,10 @@ minted — see [docs/AUTH_BRIDGE.md](docs/AUTH_BRIDGE.md).
 
 ## Supabase
 
-Migrations live in `supabase/migrations/`, applied in filename order. Note
-`supabase/` is gitignored, so those files are the only local record of a schema
-that is managed through the dashboard/MCP.
+Migrations live in `supabase/migrations/`, applied in filename order. The
+schema is managed through the dashboard/MCP; files are named with the version
+the live database recorded, so they match `supabase_migrations.schema_migrations`.
+Migrations before 2026-10-28 predate tracking and exist only in the database.
 
 **Read [docs/RLS.md](docs/RLS.md) before adding a table.** This project's default
 privileges grant every new table in `public` full access to `anon`, so each one

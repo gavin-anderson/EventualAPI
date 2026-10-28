@@ -24,11 +24,12 @@ Jobs (registry in `src/jobs/run.ts`):
 | `sync-earnings-calendar` | `earnings_events` (3 months, Alpha Vantage + EDGAR; 1 AV call) | daily (+ on boot) |
 | `sync-earnings-history` | `earnings_history` (≤20 AV calls/run, most-needed tickers first) | daily (+ on boot) |
 | `refresh-approaching` | `earnings_events` in (1h, 24h], unconfirmed — EDGAR only | hourly |
-| `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only | every 5 min |
+| `refresh-imminent` | `earnings_events` in [-3h, 1h], unconfirmed — EDGAR only; then pushes "earnings are out" to every user for each fresh release (claimed once via `released_notified_at`) | every 5 min |
 | `sync-earnings-odds` | `earnings_odds` (Polymarket) | hourly (systemd timer optional) |
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
-| `evaluate-risk` | nothing — logs liquidation proximity | every 30s, **shadow mode** |
+| `evaluate-risk` | logs liquidation proximity (**shadow mode**); then pushes PnL milestones on margin (`position_pnl_alerts`) | every 30s |
 | `detect-liquidations` | `liquidation_events` + a push; closes the `positions` row on a full liquidation | every minute |
+| `detect-price-moves` | `price_move_alerts` + a push to watchers when a market is 10% (then 20%) off its 24h-ago mark; each alert then cools down for 24h | every 2 min |
 | `backfill-earnings-reactions` | `earnings_history.price_change_24h_pct` for pre-perp dates (Yahoo) | by hand only — see [EARNINGS_DATA.md](EARNINGS_DATA.md) |
 
 The calendar and history syncs need `ALPHAVANTAGE_API_KEY`; the EDGAR lookups
@@ -175,7 +176,8 @@ systemctl enable --now \
   hl-api-refresh-imminent.timer \
   hl-api-refresh-positions.timer \
   hl-api-evaluate-risk.timer \
-  hl-api-detect-liquidations.timer
+  hl-api-detect-liquidations.timer \
+  hl-api-detect-price-moves.timer
 
 # Optional — only if keeping Polymarket odds:
 # systemctl enable --now hl-api-sync-earnings-odds.timer

@@ -148,8 +148,6 @@ export function fetchUserFills(
 
 // ── Market data ───────────────────────────────────────────────────────────────
 
-// ── Market data ───────────────────────────────────────────────────────────────
-
 interface RawAssetCtx {
   markPx: string | null;
   midPx: string | null;
@@ -160,13 +158,18 @@ interface RawUniverseAsset {
   name: string;
   szDecimals: number;
   maxLeverage?: number;
+  /** Present (true) only on delisted markets; their ctx keeps a frozen mark. */
+  isDelisted?: boolean;
 }
 
 export interface MarketQuote {
   coin: string;
   /** Mark price — what HL liquidates against. Never use mid; the two differ. */
   markPx: number;
+  /** Mark 24 hours ago, rolling — HL's own "24h change" reference. */
   prevDayPx: number | null;
+  /** The market no longer trades, so its mark is frozen and moves nothing. */
+  isDelisted: boolean;
 }
 
 function num(v: string | null | undefined): number | null {
@@ -195,7 +198,12 @@ export async function fetchMarketQuotes(dex: string): Promise<Map<string, Market
     const markPx = num(ctx.markPx) ?? num(ctx.midPx);
     if (markPx === null || markPx <= 0) return;
     const coin = bareCoin(asset.name);
-    out.set(coin, { coin, markPx, prevDayPx: num(ctx.prevDayPx) });
+    out.set(coin, {
+      coin,
+      markPx,
+      prevDayPx: num(ctx.prevDayPx),
+      isDelisted: asset.isDelisted === true,
+    });
   });
   return out;
 }

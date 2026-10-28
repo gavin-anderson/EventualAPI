@@ -40,6 +40,7 @@ const schedule: Array<{ job: string; due: Due }> = [
   { job: "refresh-positions", due: () => true }, //                       every 30s
   { job: "evaluate-risk", due: () => true }, //                           every 30s, shadow mode
   { job: "detect-liquidations", due: (t) => t.getUTCSeconds() === 0 }, // every minute
+  { job: "detect-price-moves", due: (t) => t.getUTCSeconds() === 0 && t.getUTCMinutes() % 2 === 0 },
   { job: "refresh-imminent", due: (t) => t.getUTCSeconds() === 0 && t.getUTCMinutes() % 5 === 0 },
   { job: "refresh-approaching", due: atMinute(0) }, //                    hourly
   { job: "sync-earnings-odds", due: atMinute(5) }, //                     hourly

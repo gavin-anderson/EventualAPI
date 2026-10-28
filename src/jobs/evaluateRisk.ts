@@ -1,5 +1,9 @@
 /**
- * Job: evaluate liquidation proximity. SHADOW MODE — sends nothing.
+ * Job: evaluate liquidation proximity (SHADOW MODE — sends nothing), then send
+ * position PnL milestones.
+ *
+ * The two share one read of the marks and nothing else. The proximity half is
+ * unchanged by the milestone step and still decides and sends nothing.
  *
  * It computes how close every mirrored position is to liquidation and logs it.
  * No notifications, no thresholds, no decisions: what to alert on is a separate
@@ -16,6 +20,7 @@
  * number to watch.
  */
 import { evaluateRisk } from "../lib/liquidation.js";
+import { notifyPnlMilestones } from "../lib/pnlMilestones.js";
 import { logger } from "../lib/logger.js";
 
 /** Buckets for the shadow data, not thresholds for alerting. */
@@ -74,5 +79,10 @@ export async function evaluateRiskJob(): Promise<void> {
       },
       "position approaching liquidation",
     );
+  }
+
+  // Separate step: shadow logging above is complete before anything is sent.
+  if (result.quotes) {
+    log.info(await notifyPnlMilestones(result.quotes), "pnl milestones checked");
   }
 }

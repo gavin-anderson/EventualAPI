@@ -30,6 +30,9 @@ export const KINDS = {
   position_closed: { pref: "position_closed", critical: true },
   funds_received: { pref: "funds_received", critical: false },
   referral_earned: { pref: "referral_earned", critical: false },
+  // Good news and bad, but news either way — so quiet hours hold it.
+  position_pnl: { pref: "position_pnl", critical: false },
+  price_move: { pref: "price_move", critical: false },
 } as const;
 
 export type NotificationKind = keyof typeof KINDS;
@@ -61,6 +64,8 @@ interface Prefs {
   position_closed: boolean;
   funds_received: boolean;
   referral_earned: boolean;
+  position_pnl: boolean;
+  price_move: boolean;
   quiet_hours_start: number | null;
   quiet_hours_end: number | null;
   timezone: string | null;
@@ -190,6 +195,36 @@ export async function notify(input: NotifyInput): Promise<NotifyOutcome> {
   return anyOk
     ? { delivered: true, devices: devices.length }
     : { delivered: false, reason: "push_failed", devices: devices.length };
+}
+
+/**
+ * Send many notifications, a few at a time. For fan-outs (one event, many
+ * users): each notify() is several round trips, so strictly one-by-one is slow,
+ * and all-at-once would open hundreds of requests against Supabase and APNs.
+ *
+ * One failure never stops the rest — it is counted and logged.
+ */
+export async function notifyMany(
+  inputs: NotifyInput[],
+  concurrency = 10,
+): Promise<{ delivered: number; failed: number }> {
+  let delivered = 0;
+  let failed = 0;
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (next < inputs.length) {
+      const input = inputs[next++]!;
+      try {
+        if ((await notify(input)).delivered) delivered += 1;
+      } catch (err) {
+        failed += 1;
+        logger.warn({ err, kind: input.kind }, "notify failed");
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, inputs.length) }, worker));
+  return { delivered, failed };
 }
 
 async function insertRow(
