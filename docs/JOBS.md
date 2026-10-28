@@ -29,7 +29,7 @@ Jobs (registry in `src/jobs/run.ts`):
 | `refresh-positions` | `wallet_open_positions` for due wallets | every 30s (budget-capped) |
 | `evaluate-risk` | logs liquidation proximity (**shadow mode**); then pushes PnL milestones on margin (`position_pnl_alerts`) | every 30s |
 | `detect-liquidations` | `liquidation_events` + a push; closes the `positions` row on a full liquidation | every minute |
-| `detect-price-moves` | `price_move_alerts` + a push to watchers when a market is 10% (then 20%) off its 24h-ago mark | every 2 min |
+| `detect-price-moves` | `price_move_alerts` + a push to watchers when a market is 10% (then 20%) off its 24h-ago mark; each alert then cools down for 24h | every 2 min |
 | `backfill-earnings-reactions` | `earnings_history.price_change_24h_pct` for pre-perp dates (Yahoo) | by hand only — see [EARNINGS_DATA.md](EARNINGS_DATA.md) |
 
 The calendar and history syncs need `ALPHAVANTAGE_API_KEY`; the EDGAR lookups

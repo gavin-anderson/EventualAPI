@@ -9,21 +9,25 @@ import { config } from "../config/env.js";
  * Measured against HL's `prevDayPx`, the mark 24 hours ago (rolling), which is
  * the reference behind HL's own 24h change. Rises and drops both count.
  *
- * Per user, per market, per UTC day, per direction: one push at 10%, and one
- * more if the move reaches 20%. A market that gaps straight to 20% gets the
- * 20% push only; both thresholds are recorded so it isn't followed by the 10%.
- * "Day" is the UTC date the push was sent — the move itself is rolling — so a
- * move that lasts past midnight UTC can be announced again the next day.
+ * Per user, market, direction and threshold (10%, then 20%), at most one push
+ * every 24 hours, counted from the last one — so a move that stays past 10% is
+ * announced once, not again at midnight. Threshold is part of that key, so a
+ * 20% push can still follow a 10% one. A market that gaps straight to 20% gets
+ * the 20% push only; both thresholds are claimed so the 10% doesn't follow it.
  *
  * Recipients are watchlist users only, by product decision: holders already get
  * PnL milestones on their position (see pnlMilestones.ts).
  *
- * Idempotency is the `price_move_alerts` primary key: rows are inserted first
- * and only newly inserted ones are announced.
+ * Idempotency is `claim_price_move_alerts()`, one SQL statement that inserts a
+ * new alert or re-arms one whose cooldown has passed. Only claimed rows are
+ * pushed, so two overlapping runs can't both send. The read beforehand only
+ * trims the work; the claim is what decides.
  */
 
 const THRESHOLDS = [10, 20];
-/** Rows per insert, to keep a busy day's request bodies modest. */
+/** How long one alert stays quiet after it fires. Must match the SQL claim. */
+const COOLDOWN_MS = 24 * 3_600_000;
+/** Rows per claim, to keep a busy day's request bodies modest. */
 const CHUNK = 500;
 
 export interface Move {
@@ -75,15 +79,15 @@ export async function detectPriceMoves(): Promise<PriceMoveResult> {
   const result: PriceMoveResult = { moves: moves.length, notified: 0 };
   if (moves.length === 0) return result;
 
-  const day = new Date().toISOString().slice(0, 10);
   const coins = moves.map((m) => m.coin);
   const [watchers, sent] = await Promise.all([
     db.from("watchlist").select("user_id, ticker").in("ticker", coins),
+    // Still cooling down. A trim only: the claim re-checks under the row lock.
     db
       .from("price_move_alerts")
       .select("user_id, coin, direction, threshold")
-      .eq("day", day)
-      .in("coin", coins),
+      .in("coin", coins)
+      .gte("last_alerted_at", new Date(Date.now() - COOLDOWN_MS).toISOString()),
   ]);
   if (watchers.error) throw new Error(`reading watchers failed: ${watchers.error.message}`);
   if (sent.error) throw new Error(`reading sent moves failed: ${sent.error.message}`);
@@ -98,7 +102,7 @@ export async function detectPriceMoves(): Promise<PriceMoveResult> {
     ((sent.data as AlertRow[]) ?? []).map((a) => key(a.user_id, a.coin, a.direction, a.threshold)),
   );
 
-  const rows: Array<AlertRow & { day: string; change_pct: number }> = [];
+  const rows: Array<AlertRow & { change_pct: number }> = [];
   for (const m of moves) {
     const direction = m.change >= 0 ? "up" : "down";
     for (const userId of watching.get(m.coin) ?? []) {
@@ -107,7 +111,6 @@ export async function detectPriceMoves(): Promise<PriceMoveResult> {
         rows.push({
           user_id: userId,
           coin: m.coin,
-          day,
           direction,
           threshold,
           change_pct: Number((m.change * 100).toFixed(2)),
@@ -117,17 +120,13 @@ export async function detectPriceMoves(): Promise<PriceMoveResult> {
   }
   if (rows.length === 0) return result;
 
-  // The insert is the lock: only rows that didn't already exist come back.
+  // The claim is the lock: only rows it inserted or re-armed come back.
   const won: AlertRow[] = [];
   for (let i = 0; i < rows.length; i += CHUNK) {
-    const { data, error } = await db
-      .from("price_move_alerts")
-      .upsert(rows.slice(i, i + CHUNK), {
-        onConflict: "user_id,coin,day,direction,threshold",
-        ignoreDuplicates: true,
-      })
-      .select("user_id, coin, direction, threshold");
-    if (error) throw new Error(`recording price moves failed: ${error.message}`);
+    const { data, error } = await db.rpc("claim_price_move_alerts", {
+      p_alerts: rows.slice(i, i + CHUNK),
+    });
+    if (error) throw new Error(`claiming price moves failed: ${error.message}`);
     won.push(...((data as AlertRow[]) ?? []));
   }
 
