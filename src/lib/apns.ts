@@ -52,6 +52,11 @@ export interface PushPayload {
   /** Unread count for the app icon. */
   badge?: number;
   /**
+   * The notification kind (e.g. "earnings_confirmed"), so an open app can react
+   * to the push itself — refetching the calendar on a release, say.
+   */
+  kind?: string;
+  /**
    * Collapse id. APNs replaces an undelivered notification carrying the same
    * one — so a position's second warning supersedes its first rather than
    * stacking on the lock screen.
@@ -85,8 +90,10 @@ export async function sendPush(
       sound: "default",
       ...(payload.badge !== undefined ? { badge: payload.badge } : {}),
     },
-    // Custom keys ride alongside `aps`; the app reads `route` to deep-link.
+    // Custom keys ride alongside `aps`; the app reads `route` to deep-link and
+    // `kind` to refresh whatever the push is about.
     ...(payload.route ? { route: payload.route } : {}),
+    ...(payload.kind ? { kind: payload.kind } : {}),
   });
 
   const client = http2.connect(HOSTS[environment]);
