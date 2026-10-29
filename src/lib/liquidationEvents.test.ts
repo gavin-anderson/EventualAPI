@@ -45,7 +45,7 @@ vi.mock("./hyperliquid.js", async (importActual) => ({
   fetchUserFills: vi.fn(),
 }));
 
-const { group, planLiquidationCloses, detectLiquidations } = await import("./liquidationEvents.js");
+const { group, isSettled, liquidationMessage, planLiquidationCloses, detectLiquidations } = await import("./liquidationEvents.js");
 const { fetchUserFills } = await import("./hyperliquid.js");
 
 const WALLET = "0xAbC0000000000000000000000000000000000001";
@@ -104,6 +104,73 @@ describe("group", () => {
   it("reads a short's remainder from a negative start position", () => {
     const [e] = group([fill({ side: "B", startPosition: "-10", sz: "4", dir: "Close Short" })], WALLET);
     expect(e).toMatchObject({ side: "short", remaining: 6 });
+  });
+});
+
+describe("a liquidation taken in steps", () => {
+  // Live fills, INTC long, 2026-10-29: a partial "market" step, then six seconds
+  // later the "backstop" step for the rest. One position, so one event.
+  const intc = (over: Partial<HlFill>) =>
+    fill({ coin: "xyz:INTC", fee: "0", ...over });
+  const steps = [
+    intc({
+      time: 1793304141720,
+      px: "83.1405",
+      sz: "0.74",
+      startPosition: "0.74",
+      closedPnl: "-5.86487",
+      dir: "Liquidated Isolated Long",
+      liquidation: { liquidatedUser: WALLET.toLowerCase(), markPx: "85.6", method: "backstop" },
+    }),
+    intc({
+      time: 1793304135752,
+      px: "79.846",
+      sz: "0.36",
+      startPosition: "1.1",
+      closedPnl: "-4.0392",
+      fee: "0.002587",
+      liquidation: { liquidatedUser: WALLET.toLowerCase(), markPx: "86.03", method: "market" },
+    }),
+  ];
+
+  it("joins the steps into one event at the last step's time and mark", () => {
+    const events = group(steps, WALLET);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      coin: "INTC",
+      side: "long",
+      liquidatedAt: new Date(1793304141720),
+      markPx: 85.6,
+      method: "backstop",
+      fillCount: 2,
+      remaining: 0,
+    });
+    expect(events[0]!.size).toBeCloseTo(1.1);
+    expect(events[0]!.realizedPnl).toBeCloseTo(-9.90407);
+  });
+
+  it("announces the whole loss once, as a full liquidation", () => {
+    const [e] = group(steps, WALLET);
+    expect(liquidationMessage(e!)).toEqual({
+      title: "INTC long liquidated",
+      body: "Your INTC long was liquidated at $85.60. Realized loss $9.90.",
+    });
+  });
+
+  it("holds a fresh partial back so a next step can join it", () => {
+    const [partial] = group([steps[1]!], WALLET);
+    expect(partial!.remaining).toBeCloseTo(0.74);
+    expect(isSettled(partial!, 1793304135752 + 10_000)).toBe(false);
+    expect(isSettled(partial!, 1793304135752 + 2 * 60_000)).toBe(true);
+    expect(liquidationMessage(partial!)).toEqual({
+      title: "INTC long partly liquidated",
+      body: "Part of your INTC long was liquidated at $86.03. Realized loss $4.04.",
+    });
+  });
+
+  it("keeps liquidations far apart as separate events", () => {
+    const later = { ...steps[0]!, time: 1793304135752 + 5 * 60_000 };
+    expect(group([steps[1]!, later], WALLET)).toHaveLength(2);
   });
 });
 

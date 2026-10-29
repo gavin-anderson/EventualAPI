@@ -23,6 +23,20 @@ import { removeLiveTake } from "./takes.js";
 const OVERLAP_MS = 10 * 60_000;
 /** First scan for a wallet reaches back this far rather than all of history. */
 const FIRST_SCAN_MS = 24 * 60 * 60_000;
+/**
+ * HL can take one position down in steps a few seconds apart: a partial
+ * "market" liquidation, then a "backstop" one for the rest (verified on an INTC
+ * long, 2026-10-29: 0.36 then 0.74, six seconds apart). Steps of the same
+ * position closer than this are one liquidation to the user.
+ */
+const STEP_GAP_MS = 60_000;
+/**
+ * A partial liquidation waits this long before it is announced, so a follow-up
+ * step can join it into one push. Shorter than OVERLAP_MS, so the re-scan that
+ * finally announces it still sees its fills; longer than STEP_GAP_MS, so once
+ * announced no later step can merge into it and re-announce the same loss.
+ */
+const PARTIAL_SETTLE_MS = 2 * 60_000;
 
 export interface DetectResult {
   walletsScanned: number;
@@ -107,7 +121,45 @@ export function group(fills: HlFill[], wallet: string): Grouped[] {
       remaining: remainingAfter(f),
     });
   }
-  return [...byEvent.values()];
+  return joinSteps([...byEvent.values()]);
+}
+
+/**
+ * Merge the steps of one liquidation (see STEP_GAP_MS) into a single event,
+ * keyed and priced by its last step: that is when and where the position was
+ * finally taken, and the loss and size are the totals across all steps.
+ */
+function joinSteps(events: Grouped[]): Grouped[] {
+  const sorted = events.sort((a, b) => a.liquidatedAt.getTime() - b.liquidatedAt.getTime());
+  const out: Grouped[] = [];
+  const lastOf = new Map<string, Grouped>();
+  for (const e of sorted) {
+    const key = `${e.coin}:${e.side}`;
+    const prev = lastOf.get(key);
+    if (
+      prev &&
+      prev.remaining > 0 &&
+      e.liquidatedAt.getTime() - prev.liquidatedAt.getTime() <= STEP_GAP_MS
+    ) {
+      prev.size += e.size;
+      prev.realizedPnl += e.realizedPnl;
+      prev.fee += e.fee;
+      prev.fillCount += e.fillCount;
+      prev.liquidatedAt = e.liquidatedAt;
+      prev.markPx = e.markPx;
+      prev.method = e.method;
+      prev.remaining = e.remaining;
+      continue;
+    }
+    out.push(e);
+    lastOf.set(key, e);
+  }
+  return out;
+}
+
+/** A partial that may still be joined by a next step is not announced yet. */
+export function isSettled(e: Grouped, now = Date.now()): boolean {
+  return e.remaining === 0 || now - e.liquidatedAt.getTime() >= PARTIAL_SETTLE_MS;
 }
 
 /**
@@ -146,7 +198,9 @@ export async function detectLiquidations(budget = 100): Promise<DetectResult> {
         : Date.now() - FIRST_SCAN_MS;
 
       const fills = await fetchUserFills(w.wallet_address, since);
-      const events = group(fills, w.wallet_address);
+      // Unsettled partials are left for the next scan, which re-reads them
+      // through the overlap.
+      const events = group(fills, w.wallet_address).filter((e) => isSettled(e));
       result.walletsScanned += 1;
       result.eventsFound += events.length;
 
@@ -172,6 +226,19 @@ export async function detectLiquidations(budget = 100): Promise<DetectResult> {
     }
   }
   return result;
+}
+
+/** Past tense only, and "partly" when the user still holds the rest. */
+export function liquidationMessage(e: Grouped): { title: string; body: string } {
+  const partial = e.remaining > 0;
+  const loss = Math.abs(e.realizedPnl);
+  return {
+    title: `${e.coin} ${e.side} ${partial ? "partly liquidated" : "liquidated"}`,
+    body:
+      (partial ? `Part of your ${e.coin} ${e.side} was liquidated` : `Your ${e.coin} ${e.side} was liquidated`) +
+      (e.markPx ? ` at $${e.markPx.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : "") +
+      (loss > 0 ? `. Realized loss $${loss.toFixed(2)}.` : "."),
+  };
 }
 
 /** Returns true when this was a new event (and so a notification was sent). */
@@ -205,15 +272,10 @@ async function recordAndNotify(
   if (error) throw new Error(`recording liquidation failed: ${error.message}`);
   if (((data as unknown[]) ?? []).length === 0) return false;
 
-  const loss = Math.abs(e.realizedPnl);
   const outcome = await notify({
     userId,
     kind: "position_liquidated",
-    title: `${e.coin} ${e.side} liquidated`,
-    body:
-      `Your ${e.coin} ${e.side} was liquidated` +
-      (e.markPx ? ` at $${e.markPx.toLocaleString("en-US")}` : "") +
-      (loss > 0 ? `. Realized loss $${loss.toFixed(2)}.` : "."),
+    ...liquidationMessage(e),
     route: `asset:${e.coin}`,
   });
 

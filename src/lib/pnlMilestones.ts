@@ -69,9 +69,11 @@ export function milestoneMessage(
 ): { title: string; body: string } {
   const dir = milestone > 0 ? "up" : "down";
   // Rounded actual, never below the milestone: crossing +50 means |roe| >= 0.5.
-  const actual = Math.round(Math.abs(roe) * 100);
+  // Title and body both carry it: a fast move can be well past the milestone by
+  // the time it is seen, and "down 50%" over "down 60%" reads as a mistake.
+  const actual = Math.max(Math.abs(milestone), Math.round(Math.abs(roe) * 100));
   return {
-    title: `${coin} ${side} ${dir} ${Math.abs(milestone)}%`,
+    title: `${coin} ${side} ${dir} ${actual}%`,
     body: `Your ${coin} ${side} is ${dir} ${actual}% on margin.`,
   };
 }
