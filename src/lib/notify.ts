@@ -170,6 +170,7 @@ export async function notify(input: NotifyInput): Promise<NotifyOutcome> {
       title: input.title,
       body: input.body,
       route: input.route ?? null,
+      kind: input.kind,
       badge: (unread ?? 0) + 1,
       ...(input.collapseId ? { collapseId: input.collapseId } : {}),
     });

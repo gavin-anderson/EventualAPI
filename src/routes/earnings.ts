@@ -4,7 +4,8 @@ import { asyncHandler } from "../middleware/errorHandler.js";
 import { badRequest, notFound } from "../lib/httpError.js";
 import { artUrl } from "../lib/assetArt.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { etMinutesOfDay } from "../lib/datetime.js";
+import { etDateOf, etMinutesOfDay } from "../lib/datetime.js";
+import { reportState } from "../lib/earningsStatus.js";
 
 export const earningsRouter = Router();
 
@@ -73,11 +74,13 @@ function timingFor(session: "bmo" | "amc" | "dmh" | null, earningsAtISO: string)
 
 /**
  * Composite event id the app keys everything on: "earnings-<TICKER>-<yyyy-MM-dd>".
- * The date is the UTC calendar day of `earnings_at` — derived identically here and
- * in the app's `event(id:)` reconstruction so ids stay stable across both paths.
+ * The date is the New York calendar day of `earnings_at`, not the UTC one: EDGAR
+ * only ever stamps a filing on the slot's ET day (see `releaseOn`), so the id
+ * survives the stamp. The UTC day didn't — the 20:00 ET "unknown" default is
+ * already the next UTC day, and a 16:05 filing moved it back.
  */
 function eventId(ticker: string, earningsAtISO: string): string {
-  return `earnings-${ticker}-${earningsAtISO.slice(0, 10)}`;
+  return `earnings-${ticker}-${etDateOf(earningsAtISO)}`;
 }
 
 function embeddedAsset(a: AssetEmbed | AssetEmbed[] | null): AssetEmbed | null {
@@ -113,6 +116,7 @@ earningsRouter.get(
     const { data, error } = await q;
     if (error) throw new Error(`earnings list failed: ${error.message}`);
 
+    const now = new Date();
     const events = ((data as unknown as EarningsEventJoinRow[] | null) ?? [])
       .map((row) => {
         const asset = embeddedAsset(row.assets);
@@ -125,6 +129,10 @@ earningsRouter.get(
           tickers: [ticker],
           timestamp: row.earnings_at,
           isTradeable: false,
+          // Where the report is: upcoming / reportingSoon / reported /
+          // presumedReported, plus the times the app needs to move between
+          // them on its own clock (see lib/earningsStatus.ts).
+          report: reportState(row, now),
           metadata: {
             title: periodLabel ? `${ticker} ${periodLabel} Earnings` : `${ticker} Earnings`,
             subtitle: asset.name,
@@ -148,6 +156,26 @@ earningsRouter.get(
     res.json({ count: events.length, events });
   }),
 );
+
+type DetailEvent = Record<string, unknown> & {
+  earnings_at: string;
+  time_precision: "exact" | "session";
+  is_confirmed: boolean;
+};
+
+/**
+ * The event the asset page describes: the first one not yet past its reporting
+ * window, so a report stays "next" while it is reporting soon instead of
+ * dropping out the moment its slot passes.
+ */
+function nextEvent(events: DetailEvent[], nowIso: string): (DetailEvent & { report: ReturnType<typeof reportState> }) | null {
+  const now = new Date(nowIso);
+  for (const e of events) {
+    const report = reportState(e, now);
+    if (report.status === "upcoming" || report.status === "reportingSoon") return { ...e, report };
+  }
+  return null;
+}
 
 // ── GET /v1/earnings/:ticker ───────────────────────────────────────────────────
 
@@ -195,7 +223,7 @@ earningsRouter.get(
     if (!data) throw notFound(`unknown ticker: ${ticker}`);
 
     const row = data as Record<string, unknown>;
-    const events = (row.earnings_events as Array<Record<string, unknown>>) ?? [];
+    const events = (row.earnings_events as DetailEvent[]) ?? [];
     const now = new Date().toISOString();
 
     // earnings_odds is one-to-one (unique asset_id), so PostgREST may embed it as
@@ -211,7 +239,7 @@ earningsRouter.get(
       description: row.description ?? null,
       iconUrl: artUrl(row.icon_ref as string | null),
       cardUrl: artUrl(row.card_ref as string | null),
-      next: events.find((e) => (e.earnings_at as string) >= now) ?? null,
+      next: nextEvent(events, now),
       history: row.earnings_history ?? [],
       odds,
     });
