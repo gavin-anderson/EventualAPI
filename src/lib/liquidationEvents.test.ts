@@ -164,7 +164,8 @@ describe("a liquidation taken in steps", () => {
     const [e] = group(steps, WALLET);
     expect(liquidationMessage(e!)).toEqual({
       title: "INTC long liquidated",
-      body: "Your INTC long was liquidated at $85.60. Realized loss $9.90.",
+      body:
+        "Your INTC long was liquidated in two steps: 0.36 at $86.03, then the other 0.74 at $85.60. Realized loss $9.90.",
     });
   });
 
@@ -197,7 +198,9 @@ describe("a liquidation taken in steps", () => {
     expect(checkLiquidation({ ...e!, size: 0.74 }, null)).toEqual([
       expect.stringMatching(/size/),
     ]);
-    expect(liquidationMessage(e!, false).body).toBe("Your INTC long was liquidated at $85.60.");
+    expect(liquidationMessage(e!, false).body).toBe(
+      "Your INTC long was liquidated in two steps: 0.36 at $86.03, then the other 0.74 at $85.60.",
+    );
   });
 
   it("keeps liquidations far apart as separate events", () => {

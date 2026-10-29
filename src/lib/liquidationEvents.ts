@@ -75,6 +75,8 @@ export interface Grouped {
   remaining: number;
   /** Size held when the liquidation began: the first step's start position. */
   startSize: number;
+  /** Each step joined into this event (see joinSteps), oldest first. */
+  steps: Array<{ size: number; markPx: number | null }>;
 }
 
 /** Size left after one fill: it closes `sz` of `|startPosition|`. */
@@ -123,8 +125,10 @@ export function group(fills: HlFill[], wallet: string): Grouped[] {
       fee,
       remaining: remainingAfter(f),
       startSize: Math.abs(Number(f.startPosition) || 0),
+      steps: [],
     });
   }
+  for (const e of byEvent.values()) e.steps = [{ size: e.size, markPx: e.markPx }];
   return joinSteps([...byEvent.values()]);
 }
 
@@ -154,6 +158,7 @@ function joinSteps(events: Grouped[]): Grouped[] {
       prev.method = e.method;
       prev.remaining = e.remaining;
       prev.startSize = Math.max(prev.startSize, e.startSize);
+      prev.steps.push(...e.steps);
       continue;
     }
     out.push(e);
@@ -260,6 +265,25 @@ export function liquidationMessage(
         `${qty(e.size)} of your ${qty(e.startSize)} ${e.coin} ${e.side} was liquidated${at}.` +
         lossLine +
         ` The other ${qty(e.remaining)} is still open.`,
+    };
+  }
+  // Taken in steps: a partial first, then the rest. Say so, with each step's
+  // size and mark, so the loss isn't read as one fill at one price.
+  if (e.steps.length === 2) {
+    const [first, last] = e.steps as [Grouped["steps"][0], Grouped["steps"][0]];
+    const stepAt = (s: Grouped["steps"][0]) => (s.markPx ? ` at ${usd(s.markPx)}` : "");
+    return {
+      title: `${e.coin} ${e.side} liquidated`,
+      body:
+        `Your ${e.coin} ${e.side} was liquidated in two steps: ` +
+        `${qty(first.size)}${stepAt(first)}, then the other ${qty(last.size)}${stepAt(last)}.` +
+        lossLine,
+    };
+  }
+  if (e.steps.length > 2) {
+    return {
+      title: `${e.coin} ${e.side} liquidated`,
+      body: `Your ${e.coin} ${e.side} was liquidated in ${e.steps.length} steps, the last${at}.` + lossLine,
     };
   }
   return {
