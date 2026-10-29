@@ -100,12 +100,18 @@ describe("crossedMilestones", () => {
 });
 
 describe("milestoneMessage", () => {
-  it("titles with the milestone and reports the actual return", () => {
+  it("reports the actual return in the title and the body alike", () => {
     expect(milestoneMessage("NVDA", "long", 50, 0.523)).toEqual({
-      title: "NVDA long up 50%",
+      title: "NVDA long up 52%",
       body: "Your NVDA long is up 52% on margin.",
     });
-    expect(milestoneMessage("NVDA", "short", -25, -0.27).title).toBe("NVDA short down 25%");
+    // The INTC push of 2026-10-29 said "down 50%" over "down 60% on margin".
+    expect(milestoneMessage("INTC", "long", -50, -0.6)).toEqual({
+      title: "INTC long down 60%",
+      body: "Your INTC long is down 60% on margin.",
+    });
+    // Rounding never reports less than the milestone crossed.
+    expect(milestoneMessage("NVDA", "short", -25, -0.2496).title).toBe("NVDA short down 25%");
   });
 });
 
@@ -122,7 +128,7 @@ describe("notifyPnlMilestones", () => {
     expect(vi.mocked(notify).mock.calls[0]![0]).toMatchObject({
       userId: "did:privy:u1",
       kind: "position_pnl",
-      title: "NVDA long up 100%",
+      title: "NVDA long up 110%",
       body: "Your NVDA long is up 110% on margin.",
       route: "asset:NVDA",
     });
@@ -134,7 +140,7 @@ describe("notifyPnlMilestones", () => {
 
     const upsert = calls.find((c) => c.op === "upsert")!;
     expect((upsert.payload as Array<{ milestone: number }>).map((r) => r.milestone)).toEqual([100]);
-    expect(vi.mocked(notify).mock.calls[0]![0].title).toBe("NVDA long up 100%");
+    expect(vi.mocked(notify).mock.calls[0]![0].title).toBe("NVDA long up 110%");
   });
 
   it("sends nothing once every crossed milestone is recorded", async () => {

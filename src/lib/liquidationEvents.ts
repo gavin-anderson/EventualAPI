@@ -23,6 +23,20 @@ import { removeLiveTake } from "./takes.js";
 const OVERLAP_MS = 10 * 60_000;
 /** First scan for a wallet reaches back this far rather than all of history. */
 const FIRST_SCAN_MS = 24 * 60 * 60_000;
+/**
+ * HL can take one position down in steps a few seconds apart: a partial
+ * "market" liquidation, then a "backstop" one for the rest (verified on an INTC
+ * long, 2026-10-29: 0.36 then 0.74, six seconds apart). Steps of the same
+ * position closer than this are one liquidation to the user.
+ */
+const STEP_GAP_MS = 60_000;
+/**
+ * A partial liquidation waits this long before it is announced, so a follow-up
+ * step can join it into one push. Shorter than OVERLAP_MS, so the re-scan that
+ * finally announces it still sees its fills; longer than STEP_GAP_MS, so once
+ * announced no later step can merge into it and re-announce the same loss.
+ */
+const PARTIAL_SETTLE_MS = 2 * 60_000;
 
 export interface DetectResult {
   walletsScanned: number;
@@ -59,6 +73,10 @@ export interface Grouped {
    * gone; anything above is a partial liquidation, and the position stays open.
    */
   remaining: number;
+  /** Size held when the liquidation began: the first step's start position. */
+  startSize: number;
+  /** Each step joined into this event (see joinSteps), oldest first. */
+  steps: Array<{ size: number; markPx: number | null }>;
 }
 
 /** Size left after one fill: it closes `sz` of `|startPosition|`. */
@@ -90,6 +108,7 @@ export function group(fills: HlFill[], wallet: string): Grouped[] {
       // The fills share a timestamp, so their order is not trusted: the
       // smallest remainder is the one left after all of them.
       existing.remaining = Math.min(existing.remaining, remainingAfter(f));
+      existing.startSize = Math.max(existing.startSize, Math.abs(Number(f.startPosition) || 0));
       continue;
     }
     byEvent.set(key, {
@@ -105,9 +124,52 @@ export function group(fills: HlFill[], wallet: string): Grouped[] {
       fillCount: 1,
       fee,
       remaining: remainingAfter(f),
+      startSize: Math.abs(Number(f.startPosition) || 0),
+      steps: [],
     });
   }
-  return [...byEvent.values()];
+  for (const e of byEvent.values()) e.steps = [{ size: e.size, markPx: e.markPx }];
+  return joinSteps([...byEvent.values()]);
+}
+
+/**
+ * Merge the steps of one liquidation (see STEP_GAP_MS) into a single event,
+ * keyed and priced by its last step: that is when and where the position was
+ * finally taken, and the loss and size are the totals across all steps.
+ */
+function joinSteps(events: Grouped[]): Grouped[] {
+  const sorted = events.sort((a, b) => a.liquidatedAt.getTime() - b.liquidatedAt.getTime());
+  const out: Grouped[] = [];
+  const lastOf = new Map<string, Grouped>();
+  for (const e of sorted) {
+    const key = `${e.coin}:${e.side}`;
+    const prev = lastOf.get(key);
+    if (
+      prev &&
+      prev.remaining > 0 &&
+      e.liquidatedAt.getTime() - prev.liquidatedAt.getTime() <= STEP_GAP_MS
+    ) {
+      prev.size += e.size;
+      prev.realizedPnl += e.realizedPnl;
+      prev.fee += e.fee;
+      prev.fillCount += e.fillCount;
+      prev.liquidatedAt = e.liquidatedAt;
+      prev.markPx = e.markPx;
+      prev.method = e.method;
+      prev.remaining = e.remaining;
+      prev.startSize = Math.max(prev.startSize, e.startSize);
+      prev.steps.push(...e.steps);
+      continue;
+    }
+    out.push(e);
+    lastOf.set(key, e);
+  }
+  return out;
+}
+
+/** A partial that may still be joined by a next step is not announced yet. */
+export function isSettled(e: Grouped, now = Date.now()): boolean {
+  return e.remaining === 0 || now - e.liquidatedAt.getTime() >= PARTIAL_SETTLE_MS;
 }
 
 /**
@@ -146,7 +208,9 @@ export async function detectLiquidations(budget = 100): Promise<DetectResult> {
         : Date.now() - FIRST_SCAN_MS;
 
       const fills = await fetchUserFills(w.wallet_address, since);
-      const events = group(fills, w.wallet_address);
+      // Unsettled partials are left for the next scan, which re-reads them
+      // through the overlap.
+      const events = group(fills, w.wallet_address).filter((e) => isSettled(e));
       result.walletsScanned += 1;
       result.eventsFound += events.length;
 
@@ -172,6 +236,105 @@ export async function detectLiquidations(budget = 100): Promise<DetectResult> {
     }
   }
   return result;
+}
+
+/** Size as HL quotes it, without float noise: 0.36, 1.1, 0.74. */
+const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 6 });
+const usd = (n: number) =>
+  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Past tense only, and a partial is always called a partial. A full
+ * liquidation ended the position; a partial took some of it and the user still
+ * holds the rest, so it says how much of each.
+ *
+ * `numbersOk: false` (see checkLiquidation) drops the loss figure rather than
+ * send one that doesn't add up: the event itself is certain, the sum is not.
+ */
+export function liquidationMessage(
+  e: Grouped,
+  numbersOk = true,
+): { title: string; body: string } {
+  const at = e.markPx ? ` at ${usd(e.markPx)}` : "";
+  const loss = Math.abs(e.realizedPnl);
+  const lossLine = numbersOk && loss > 0 ? ` Realized loss ${usd(loss)}.` : "";
+
+  if (e.remaining > 0) {
+    return {
+      title: `${e.coin} ${e.side} partial liquidation`,
+      body:
+        `Partial liquidation: ${qty(e.size)} of your ${qty(e.startSize)} ${e.coin} ${e.side} was liquidated${at}.` +
+        lossLine +
+        ` The other ${qty(e.remaining)} is still open.`,
+    };
+  }
+  // Taken in steps: a partial first, then the rest. Say so, with each step's
+  // size and mark, so the loss isn't read as one fill at one price.
+  if (e.steps.length === 2) {
+    const [first, last] = e.steps as [Grouped["steps"][0], Grouped["steps"][0]];
+    const stepAt = (s: Grouped["steps"][0]) => (s.markPx ? ` at ${usd(s.markPx)}` : "");
+    return {
+      title: `${e.coin} ${e.side} liquidated`,
+      body:
+        `Your ${e.coin} ${e.side} was liquidated in two steps: a partial liquidation of ` +
+        `${qty(first.size)}${stepAt(first)}, then the other ${qty(last.size)}${stepAt(last)}.` +
+        lossLine,
+    };
+  }
+  if (e.steps.length > 2) {
+    return {
+      title: `${e.coin} ${e.side} liquidated`,
+      body:
+        `Your ${e.coin} ${e.side} was liquidated in ${e.steps.length} steps, partial liquidations ` +
+        `first and the last${at}.` +
+        lossLine,
+    };
+  }
+  return {
+    title: `${e.coin} ${e.side} liquidated`,
+    body: `Your ${e.coin} ${e.side} was liquidated${at}.` + lossLine,
+  };
+}
+
+/**
+ * Sanity checks on an event's numbers before they are sent to the user. Each
+ * returned string is a check that failed; empty means the numbers agree.
+ *
+ * - The sizes add up: what was taken plus what is left is what was held.
+ * - A liquidation is a loss, never a gain.
+ * - An isolated position cannot lose more than the margin behind it (`margin`,
+ *   from the position rows, when known). A little slack covers fees and the
+ *   rounding of HL's margin figure.
+ */
+export function checkLiquidation(e: Grouped, margin: number | null): string[] {
+  const problems: string[] = [];
+  const tol = Math.max(1e-9, e.startSize * 1e-6);
+  if (Math.abs(e.size + e.remaining - e.startSize) > tol) {
+    problems.push(`size ${e.size} + remaining ${e.remaining} != held ${e.startSize}`);
+  }
+  if (e.realizedPnl > 0) problems.push(`realized pnl is a gain: ${e.realizedPnl}`);
+  if (margin !== null && margin > 0) {
+    const loss = Math.abs(e.realizedPnl);
+    if (loss > margin * 1.02 + 0.01) problems.push(`loss ${loss} exceeds margin ${margin}`);
+  }
+  return problems;
+}
+
+/** Margin on the user's open rows for this position, or null when unknown. */
+async function marginBehind(userId: string, e: Grouped): Promise<number | null> {
+  const { data, error } = await supabaseAdmin()
+    .from("positions")
+    .select("margin_used")
+    .eq("user_id", userId)
+    .eq("coin", e.coin)
+    .eq("side", e.side)
+    .is("closed_at", null)
+    .lte("opened_at", e.liquidatedAt.toISOString());
+  // The check is a guard, not a gate: a failed lookup skips it.
+  if (error) return null;
+  const rows = (data as Array<{ margin_used: number | null }>) ?? [];
+  const total = rows.reduce((sum, r) => sum + (Number(r.margin_used) || 0), 0);
+  return total > 0 ? total : null;
 }
 
 /** Returns true when this was a new event (and so a notification was sent). */
@@ -205,15 +368,17 @@ async function recordAndNotify(
   if (error) throw new Error(`recording liquidation failed: ${error.message}`);
   if (((data as unknown[]) ?? []).length === 0) return false;
 
-  const loss = Math.abs(e.realizedPnl);
+  const problems = checkLiquidation(e, await marginBehind(userId, e));
+  if (problems.length > 0) {
+    logger.error(
+      { coin: e.coin, side: e.side, wallet, problems },
+      "liquidation numbers failed sanity check; sending without the loss",
+    );
+  }
   const outcome = await notify({
     userId,
     kind: "position_liquidated",
-    title: `${e.coin} ${e.side} liquidated`,
-    body:
-      `Your ${e.coin} ${e.side} was liquidated` +
-      (e.markPx ? ` at $${e.markPx.toLocaleString("en-US")}` : "") +
-      (loss > 0 ? `. Realized loss $${loss.toFixed(2)}.` : "."),
+    ...liquidationMessage(e, problems.length === 0),
     route: `asset:${e.coin}`,
   });
 
@@ -237,6 +402,7 @@ async function recordAndNotify(
 export interface OpenRow {
   id: string;
   size: number;
+  opened_at?: string;
 }
 
 export interface ClosePatch {
@@ -257,7 +423,12 @@ export interface ClosePatch {
  * There is no `close_cloid` (HL placed these orders, not the app). The user's
  * take on the position is removed separately (see removeLiveTake).
  */
-export function planLiquidationCloses(rows: OpenRow[], e: Grouped): ClosePatch[] {
+export function planLiquidationCloses(
+  rows: OpenRow[],
+  e: Grouped,
+  /** Loss already taken by earlier partial liquidations of the same position. */
+  earlierPnl = 0,
+): ClosePatch[] {
   const total = rows.reduce((sum, r) => sum + (Number(r.size) || 0), 0);
   return rows.map((r) => {
     const share = total > 0 ? (Number(r.size) || 0) / total : 1 / rows.length;
@@ -267,7 +438,7 @@ export function planLiquidationCloses(rows: OpenRow[], e: Grouped): ClosePatch[]
       // Mark, not the fill px: HL liquidates against mark, and the fills of one
       // event land at several prices.
       exit_px: e.markPx,
-      realized_pnl: e.realizedPnl * share,
+      realized_pnl: (e.realizedPnl + earlierPnl) * share,
       close_fee_paid: e.fee * share,
     };
   });
@@ -287,16 +458,19 @@ export async function closeLiquidatedPositions(userId: string, e: Grouped): Prom
 
   const { data, error } = await db
     .from("positions")
-    .select("id, size")
+    .select("id, size, opened_at")
     .eq("user_id", userId)
     .eq("coin", e.coin)
     .eq("side", e.side)
     .is("closed_at", null)
     .lte("opened_at", e.liquidatedAt.toISOString());
   if (error) throw new Error(`liquidated position lookup failed: ${error.message}`);
+  const rows = (data as OpenRow[]) ?? [];
+  if (rows.length === 0) return 0;
 
   let closed = 0;
-  for (const { id, ...patch } of planLiquidationCloses((data as OpenRow[]) ?? [], e)) {
+  const earlier = await earlierPartialPnl(userId, e, rows);
+  for (const { id, ...patch } of planLiquidationCloses(rows, e, earlier)) {
     const { data: updated, error: updateError } = await db
       .from("positions")
       .update(patch)
@@ -313,4 +487,30 @@ export async function closeLiquidatedPositions(userId: string, e: Grouped): Prom
     logger.info({ coin: e.coin, side: e.side, closed }, "closed liquidated position rows");
   }
   return closed;
+}
+
+/**
+ * Loss from partial liquidations of this position that were announced on their
+ * own, before the step that ended it (too far apart to join, see STEP_GAP_MS).
+ * The closed row carries the position's whole liquidation loss, not just the
+ * last step's.
+ */
+async function earlierPartialPnl(userId: string, e: Grouped, rows: OpenRow[]): Promise<number> {
+  const opened = rows
+    .map((r) => Date.parse(r.opened_at ?? ""))
+    .filter((t) => Number.isFinite(t));
+  if (opened.length === 0) return 0;
+  const { data, error } = await supabaseAdmin()
+    .from("liquidation_events")
+    .select("realized_pnl")
+    .eq("user_id", userId)
+    .eq("coin", e.coin)
+    .eq("side", e.side)
+    .gte("liquidated_at", new Date(Math.min(...opened)).toISOString())
+    .lt("liquidated_at", e.liquidatedAt.toISOString());
+  if (error) throw new Error(`earlier partial lookup failed: ${error.message}`);
+  return ((data as Array<{ realized_pnl: number }>) ?? []).reduce(
+    (sum, r) => sum + (Number(r.realized_pnl) || 0),
+    0,
+  );
 }
