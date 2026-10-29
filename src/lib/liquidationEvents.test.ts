@@ -165,7 +165,7 @@ describe("a liquidation taken in steps", () => {
     expect(liquidationMessage(e!)).toEqual({
       title: "INTC long liquidated",
       body:
-        "Your INTC long was liquidated in two steps: 0.36 at $86.03, then the other 0.74 at $85.60. Realized loss $9.90.",
+        "Your INTC long was liquidated in two steps: a partial liquidation of 0.36 at $86.03, then the other 0.74 at $85.60. Realized loss $9.90.",
     });
   });
 
@@ -175,8 +175,8 @@ describe("a liquidation taken in steps", () => {
     expect(isSettled(partial!, 1793304135752 + 10_000)).toBe(false);
     expect(isSettled(partial!, 1793304135752 + 2 * 60_000)).toBe(true);
     expect(liquidationMessage(partial!)).toEqual({
-      title: "INTC long partly liquidated",
-      body: "0.36 of your 1.1 INTC long was liquidated at $86.03. Realized loss $4.04. The other 0.74 is still open.",
+      title: "INTC long partial liquidation",
+      body: "Partial liquidation: 0.36 of your 1.1 INTC long was liquidated at $86.03. Realized loss $4.04. The other 0.74 is still open.",
     });
   });
 
@@ -199,7 +199,15 @@ describe("a liquidation taken in steps", () => {
       expect.stringMatching(/size/),
     ]);
     expect(liquidationMessage(e!, false).body).toBe(
-      "Your INTC long was liquidated in two steps: 0.36 at $86.03, then the other 0.74 at $85.60.",
+      "Your INTC long was liquidated in two steps: a partial liquidation of 0.36 at $86.03, then the other 0.74 at $85.60.",
+    );
+  });
+
+  it("names the partials when there were more than two steps", () => {
+    const [e] = group(steps, WALLET);
+    const three = { ...e!, steps: [...e!.steps, { size: 0, markPx: 85 }] };
+    expect(liquidationMessage(three).body).toBe(
+      "Your INTC long was liquidated in 3 steps, partial liquidations first and the last at $85.60. Realized loss $9.90.",
     );
   });
 

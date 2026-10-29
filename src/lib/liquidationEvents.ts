@@ -244,8 +244,9 @@ const usd = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
- * Past tense only. A full liquidation ended the position; a partial took some
- * of it and the user still holds the rest, so it says how much of each.
+ * Past tense only, and a partial is always called a partial. A full
+ * liquidation ended the position; a partial took some of it and the user still
+ * holds the rest, so it says how much of each.
  *
  * `numbersOk: false` (see checkLiquidation) drops the loss figure rather than
  * send one that doesn't add up: the event itself is certain, the sum is not.
@@ -260,9 +261,9 @@ export function liquidationMessage(
 
   if (e.remaining > 0) {
     return {
-      title: `${e.coin} ${e.side} partly liquidated`,
+      title: `${e.coin} ${e.side} partial liquidation`,
       body:
-        `${qty(e.size)} of your ${qty(e.startSize)} ${e.coin} ${e.side} was liquidated${at}.` +
+        `Partial liquidation: ${qty(e.size)} of your ${qty(e.startSize)} ${e.coin} ${e.side} was liquidated${at}.` +
         lossLine +
         ` The other ${qty(e.remaining)} is still open.`,
     };
@@ -275,7 +276,7 @@ export function liquidationMessage(
     return {
       title: `${e.coin} ${e.side} liquidated`,
       body:
-        `Your ${e.coin} ${e.side} was liquidated in two steps: ` +
+        `Your ${e.coin} ${e.side} was liquidated in two steps: a partial liquidation of ` +
         `${qty(first.size)}${stepAt(first)}, then the other ${qty(last.size)}${stepAt(last)}.` +
         lossLine,
     };
@@ -283,7 +284,10 @@ export function liquidationMessage(
   if (e.steps.length > 2) {
     return {
       title: `${e.coin} ${e.side} liquidated`,
-      body: `Your ${e.coin} ${e.side} was liquidated in ${e.steps.length} steps, the last${at}.` + lossLine,
+      body:
+        `Your ${e.coin} ${e.side} was liquidated in ${e.steps.length} steps, partial liquidations ` +
+        `first and the last${at}.` +
+        lossLine,
     };
   }
   return {
